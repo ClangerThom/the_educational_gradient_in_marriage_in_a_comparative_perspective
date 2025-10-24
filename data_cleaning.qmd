@@ -14,6 +14,16 @@ editor: visual
 
     -   IT'S MISCODED - the iso3n code in the file 860 is for Uzbekistan, not Kazakhstan, it should be 398
 
+## List of countries that need harmonisation
+
+-   [ ] France GGS round 2
+
+-   [ ] Sweden GGS round 2
+
+-   [ ] Netherlands GGS round 2
+
+I harmonised in a bunch more, but I was just dumb and Claudius had already done it and I just hadn't noticed it.
+
 ## Initial setup
 
 ```{r packages}
@@ -175,4 +185,24 @@ micro_clean <- micro_clean |>
   relocate(isled, .after = isced_7)
 ```
 
-## Computationally demanding stuff - expansion into long-format
+## Expansion into long-format
+
+This is computationally very demanding, the resulting df has over 4 million rows. Make sure you have a powerful computer or be prepared to sit for a loooooong time.
+
+## Identifying 1st marriage
+
+```{r identify-first-marriage}
+
+```
+
+## Cohabitation indicator
+
+```{r construct-cohabitation-indicator}
+
+```
+
+## Additional controls
+
+```{r finalise-for-analysis}
+
+```
