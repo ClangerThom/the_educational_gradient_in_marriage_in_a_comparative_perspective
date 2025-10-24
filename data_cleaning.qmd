@@ -1,0 +1,178 @@
+---
+title: "data_cleaning"
+format: html
+editor: visual
+---
+
+## Known issues
+
+-   ISLED coding scheme is incomplete
+
+-   UK BHPS has 3500 respondents with a personal weight of 0
+
+-   Kazakhstan is disappearing despite officially being in harmonized_histories_I
+
+    -   IT'S MISCODED - the iso3n code in the file 860 is for Uzbekistan, not Kazakhstan, it should be 398
+
+## Initial setup
+
+```{r packages}
+#| message: false
+#| warning: false
+
+# General functionality
+library(tidyverse)
+
+# For importing the data
+library(sjmisc)
+library(haven)
+library(janitor)
+library(countrycode)
+```
+
+## Importing raw data
+
+```{r raw-data}
+#| message: false
+#| warning: false
+
+# for getting correct file paths
+source("config.R")
+
+# getting in all the harmonized histories (downloaded the latest version from September)
+hh1 <- read_dta(paste0(data_path, "/harmonized_histories.dta")) |> clean_names("snake")
+hh2 <- read_dta(paste0(data_path, "/harmonized_histories_I.dta")) |> clean_names("snake")
+hh3 <- read_dta(paste0(data_path, "/harmonized_histories_II.dta")) |> clean_names("snake")
+
+# appending them all onto each other with sjmisc to preserve labels
+# the labels diverge with hhII, it throws up a lot of warnings, so that's why I silence them
+rough_df <- add_rows(hh1, hh2, hh3, id = "source_dataset")
+
+# unload intermediate massive dfs
+rm(list = ls(pattern = "^hh"))
+```
+
+## Cleaning micro-data
+
+```{r initial-clean}
+micro_clean <- rough_df |> 
+  
+  # tidying up country variables
+  mutate(
+    country = as.character(country), # convert to character first
+    # pad the ISO codes so they work (Austria and Belgium need a 0 at the beginning)
+    country_code_iso = str_pad(country, width = 4, side = "left", pad = "0")
+  ) |> 
+  
+  separate_wider_position(
+    country_code_iso,
+    widths = c(country_code = 3, round = 1)
+  ) |> 
+  
+  # convert ISO code to country name
+  mutate(
+    country_code = as.numeric(country_code),
+    country = countrycode(country_code, "iso3n", "country.name"),
+    
+    # Uzbekistan is actually Kazakhstan in this dataset, miscoded variable
+    country = if_else(country == "Uzbekistan", "Kazakhstan", country)
+  ) |> 
+  
+  select(
+    # stratifying things
+    source_dataset, # Which harmonized histories dataset is the obs from
+    country, # country
+    round, # survey round
+    
+    # basic respondent information
+    respid,
+    arid, # respondent IDs
+    sex,
+    
+    year_s, # year of survey
+    
+    born_y, # year of birth
+    
+    native, # born in country of interview?
+    
+    # Education
+    edu_cou, # country specific highest level of education
+    isced_7, # isced coded highest level of education
+    inschool,
+    
+    # Education dates
+    edu_y,
+    iedu_y, # Imputation with help of modal ages by levels of education if imputed year>year of interview==>.a
+    
+    # Weights:
+    hhwgt,
+    perswgt,
+    kishwgt,
+    
+    # Union information (not marriage specific)
+    uninum, # number of unions
+    starts_with("union_"), # union order and all the associated dates
+    
+    starts_with("sep_"), # union dissolution and associated dates
+    
+    # Marriage specific information
+    starts_with("marr_"), # type of marriage and dates
+    
+    starts_with("div_"), # divorce information
+    
+    # Left truncated things from the BHPS
+    starts_with("lt")
+  )
+
+# unloading previous dataset
+rm(rough_df)
+```
+
+## Isled recode
+
+```{r isled-recode}
+# added in kazakhstan and croat recodes
+isled_coding <- read_csv(paste0(data_path, "/isled_me.csv")) |> 
+  
+  # fixing values within the codebook
+  mutate(
+    isled_7 = case_when(
+      `isled_7 (0+1+2)` > 100 ~ (isled_1 + isled_2)/2,
+      is.na(`isled_7 (0+1+2)`) ~ NA,
+      .default = `isled_7 (0+1+2)`
+    ),
+    isled_8 = case_when(
+      `isled_8 (5+6)` > 100 ~ (isled_5 + isled_6)/2,
+      is.na(`isled_8 (5+6)`) ~ NA,
+      .default = `isled_8 (5+6)`
+    ),
+    isled_9 = case_when(
+      `isled_9 (3+4)` > 100 ~ (isled_3 + isled_4)/2,
+      is.na(`isled_9 (3+4)`) ~ NA,
+      .default = `isled_9 (3+4)`
+    )
+  ) |> 
+  
+  # tidying the codebook - putting it into long format for left_join() later
+  select(-`isled_7 (0+1+2)`, -`isled_8 (5+6)`, -`isled_9 (3+4)`) %>% 
+  pivot_longer(
+    cols = starts_with("isled"),
+    names_to = "isced_7",
+    names_prefix = "isled_",
+    values_to = "isled",
+    values_drop_na = TRUE
+  ) |>  
+  mutate(
+    isced_7 = as.numeric(isced_7)
+  )
+
+# recoding the isced_7 values
+micro_clean <- 
+  left_join(micro_clean, isled_coding, by = join_by(country, isced_7))
+
+# relocate needed a new pipe
+micro_clean <- micro_clean |> 
+  relocate(isled, .after = isced_7)
+```
+
+## Computationally demanding stuff - expansion into long-format
