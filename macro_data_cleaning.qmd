@@ -101,5 +101,227 @@ rm(lf_rate_ilo_modeled)
 ## ILO unemployment by education
 
 ```{r unemployment-by-education}
+unemployment_educ_raw <- read.csv("https://rplumber.ilo.org/data/indicator/?id=UNE_DEAP_SEX_AGE_EDU_RT_A&sex=SEX_T+SEX_M+SEX_F&classif1=AGE_YTHADULT_Y15-64&classif2=EDU_ISCED11_TOTAL+EDU_ISCED11_X+EDU_ISCED11_0+EDU_ISCED11_1+EDU_ISCED11_2+EDU_ISCED11_3+EDU_ISCED11_4+EDU_ISCED11_5+EDU_ISCED11_6+EDU_ISCED11_7+EDU_ISCED11_8+EDU_ISCED11_9&timefrom=1970&timeto=2024&type=label&format=.csv")
 
+unemployment_educ <- unemployment_educ_raw |> 
+  tibble() |> 
+  mutate(country = ref_area.label,
+         indicator = indicator.label,
+         source = source.label,
+         age = classif1.label,
+         educ = classif2.label,
+         sex = sex.label) |> 
+  mutate(
+    country = case_when(
+    country == "United Kingdom of Great Britain and Northern Ireland" ~ "United Kingdom",
+    country == "United States of America" ~ "United States",
+    country == "Republic of Moldova" ~ "Moldova",
+    country == "Russian Federation" ~ "Russia",
+    TRUE ~ country  # Keep all other values as they are
+  )) |> 
+  # pulling my countries
+  filter(country %in% unique(micro_clean$country)) |> 
+  select(country, indicator, sex, age, educ, time, obs_value, obs_status.label, source)
+
+unemployment_index <- unemployment_educ |> 
+  
+  # recoding educ
+  mutate(educ = case_when(
+    str_detect(educ, "X\\.") ~ "-1",  # If it contains "x."
+    TRUE ~ str_extract(educ, "(?<=\\): )\\d+")  # Otherwise extract the number
+  )) |>
+  
+  # grouping educ
+  mutate(educ_group = case_when(
+    educ < 3 ~ "below upper-secondary",
+    educ > 4 ~ "tertiary",
+    TRUE ~ "upper-secondary"
+  )) |> 
+
+  # just total gender
+  filter(sex == "Total") |> 
+
+  # just specific education categories
+  filter(educ != "Education (ISCED-11): Total")
+
+# Calculate upper secondary mean
+upper_sec_means <- unemployment_index |>
+  filter(educ_group == "upper-secondary") |>
+  group_by(country, time) |>
+  summarise(upper_sec_mean = mean(obs_value))
+
+below_upper_sec_means <- unemployment_index |>
+  filter(educ_group == "below upper-secondary") |>
+  group_by(country, time) |>
+  summarise(below_upper_sec_mean = mean(obs_value))
+  
+# Join and calculate index
+unemployment_index <- unemployment_index |>
+  group_by(country, time, educ_group, sex, source, indicator) |> 
+  summarise(mean_value = mean(obs_value)) |>
+  ungroup() |> 
+  left_join(upper_sec_means, by = join_by(country, time)) |>
+  left_join(below_upper_sec_means, by = join_by(country, time)) |>
+  mutate(upper_sec_index = mean_value / upper_sec_mean * 100,
+         below_upper_sec_index = mean_value / below_upper_sec_mean * 100)
+
+# unloading intermediate dfs
+rm(upper_sec_means)
+rm(bellow_upper_sec_means)
+
+rm(unemployment_educ_raw)
+rm(unemployment_educ)
+```
+
+## ILO earnings advantage
+
+```{r earnings-advantage}
+earnings_educ_raw <- read.csv("https://rplumber.ilo.org/data/indicator/?id=EAR_4MTH_SEX_EDU_CUR_NB_A&sex=SEX_T+SEX_M+SEX_F&classif1=EDU_ISCED11_TOTAL+EDU_ISCED11_X+EDU_ISCED11_0+EDU_ISCED11_1+EDU_ISCED11_2+EDU_ISCED11_3+EDU_ISCED11_4+EDU_ISCED11_5+EDU_ISCED11_6+EDU_ISCED11_7+EDU_ISCED11_8&timefrom=1989&timeto=2024&type=label&format=.csv")
+
+earnings_educ <- earnings_educ_raw |> 
+  tibble() |> 
+  mutate(country = ref_area.label,
+         indicator = indicator.label,
+         source = source.label,
+         educ = classif1.label,
+         currency = classif2.label,
+         sex = sex.label) |> 
+  mutate(
+    country = case_when(
+    country == "United Kingdom of Great Britain and Northern Ireland" ~ "United Kingdom",
+    country == "United States of America" ~ "United States",
+    country == "Republic of Moldova" ~ "Moldova",
+    country == "Russian Federation" ~ "Russia",
+    TRUE ~ country  # Keep all other values as they are
+  )) |> 
+  # pulling my countries
+  filter(country %in% unique(micro_clean$country)) |> 
+  select(country, indicator, sex, educ, currency, time, obs_value, source, note_indicator.label) |> 
+  
+  # just 2021 ppp $
+  filter(currency == "Currency: 2021 PPP $") |>
+  
+  # just total gender
+  filter(sex == "Total") |> 
+  
+  # just specific education categories
+  filter(educ != "Education (ISCED-11): Total") |> 
+  
+  # recoding the educ
+  mutate(educ = case_when(
+    str_detect(educ, "X\\.") ~ "-1",  # If it contains "x."
+    TRUE ~ str_extract(educ, "(?<=\\): )\\d+")  # Otherwise extract the number
+  )) |> 
+  
+  # breaks in series
+  mutate(break_in_series = case_when(
+    str_detect(note_indicator.label, "Break in series") ~ 1,
+    TRUE ~ 0
+  ))
+
+relative_earnings <-  earnings_educ |> 
+  
+  # Creating educational groups
+  mutate(educ_group = case_when(
+    educ < 3 ~ "below upper-secondary",
+    educ > 4 ~ "tertiary",
+    TRUE ~ "upper-secondary"
+  ))
+
+# Calculate upper secondary mean
+upper_sec_means <- relative_earnings |>
+  filter(educ_group == "upper-secondary") |>
+  group_by(country, time) |>
+  summarise(upper_sec_mean = mean(obs_value))
+
+below_upper_sec_means <- relative_earnings |>
+  filter(educ_group == "below upper-secondary") |>
+  group_by(country, time) |>
+  summarise(below_upper_sec_mean = mean(obs_value))
+  
+# Join and calculate index
+relative_earnings_index <- relative_earnings |>
+  group_by(country, time, educ_group, sex, break_in_series, source, currency, indicator) |> 
+  summarise(mean_value = mean(obs_value)) |>
+  ungroup() |> 
+  left_join(upper_sec_means, by = join_by(country, time)) |>
+  left_join(below_upper_sec_means, by = join_by(country, time)) |>
+  mutate(upper_sec_index = mean_value / upper_sec_mean * 100,
+         below_upper_sec_index = mean_value / below_upper_sec_mean * 100)
+
+# removing intermediate dfs
+rm(upper_sec_means)
+rm(below_upper_sec_means)
+
+rm(relative_earnings)
+rm(earnings_educ)
+rm(earnings_educ_raw)
+```
+
+## Combining all the ILO measures
+
+```{r economy-indicators}
+# With unemployment - more than 100 means disadvantage from education
+macro_indicators <- unemployment_index |> 
+  select(-mean_value, -upper_sec_mean, -below_upper_sec_mean) |> 
+  filter(educ_group == "tertiary" | educ_group == "upper-secondary") |> 
+  pivot_longer(
+    cols = c(upper_sec_index, below_upper_sec_index),
+    names_to = "index",
+    values_to = "index_value"
+  ) |>
+  mutate(index = str_remove(index, "_index")) |> 
+  filter((educ_group == "upper-secondary" & index != "upper_sec") | (educ_group == "tertiary" & index != "below_upper_sec")) |>
+  
+  # now making the averages
+  group_by(country, time, sex) |> 
+  summarise(educ_unemployment_advantage = mean(index_value)) |> 
+  ungroup()
+
+# with earnings - higher means greater advantage
+macro_indicators <- 
+  full_join(macro_indicators,
+  
+  # constructing the other measure
+  relative_earnings_index |>           
+  select(-mean_value, -upper_sec_mean, -below_upper_sec_mean) |> 
+  filter(educ_group == "tertiary" | educ_group == "upper-secondary") |> 
+  pivot_longer(
+    cols = c(upper_sec_index, below_upper_sec_index),
+    names_to = "index",
+    values_to = "index_value"
+  ) |>
+  mutate(index = str_remove(index, "_index")) |> 
+  filter((educ_group == "upper-secondary" & index != "upper_sec") | (educ_group == "tertiary" & index != "below_upper_sec")) |>
+  
+  # now making the averages
+  group_by(country, time, sex) |> 
+  summarise(educ_earnings_advantage = mean(index_value)) |> 
+  ungroup(),
+  
+  by = join_by(country, time, sex)
+  )
+
+# adding female labour force participation
+
+macro_indicators <- 
+  full_join(macro_indicators,
+    lf_rate_combined |> 
+      filter(sex == "Female") |> 
+      select(-sex, -age, - source, - indicator) |> 
+      rename(female_lfp_rate = obs_value),
+    by = join_by(country, time)
+  ) |>
+  select(-sex) |> 
+  arrange(country, time)
+  
+  # adding men
+macro_indicators <-
+  full_join(macro_indicators,
+    lf_rate_combined |> 
+      filter(sex == "Male") |> 
+      select(-sex, -age, - source, - indicator) |> 
+      rename(male_lfp_rate = obs_value),
+    by = join_by(country, time)
+  )
 ```
