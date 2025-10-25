@@ -1,0 +1,345 @@
+---
+title: "harmonisation"
+format: html
+editor: visual
+---
+
+## Initial setup
+
+```{r packages}
+#| message: false
+#| warning: false
+
+# General functionality
+library(tidyverse)
+
+# For importing the data
+library(sjmisc)
+library(haven)
+library(janitor)
+library(countrycode)
+```
+
+## List of countries that need harmonisation
+
+-   [x] France GGS round 2
+
+-   [x] Sweden GGS round 2
+
+-   [x] Netherlands GGS round 2
+
+I harmonised in a bunch more in an old version, but I was just dumb and Claudius Garten from NIDI had already done it and I just hadn't noticed it.
+
+## Loading in raw datasets
+
+```{r raw-data}
+# get the default file paths
+source("config.R")
+
+data_list <- list.files(paste0(data_path, "/harmonisation"), pattern = "\\.dta$", full.names = TRUE) |> 
+  (\(x) set_names(x, basename(x)))() |> 
+  map(read_dta) 
+
+list2env(data_list, envir = .GlobalEnv)
+rm(data_list)
+```
+
+## Harmonisation
+
+Here I harmonise all the non-relationship history variables. The rest will have to be done in another code chunk and will require reordering of relationships, since the survey has a current relationship + history variable instead of all the relationships being chronologically ordered.
+
+```{r initial-harmonisation}
+# list of surveys
+object_names <- c("france_round2.dta", "netherlands_round2.dta", "sweden_round2.dta")
+
+# Convert country variable in each object
+for (obj_name in object_names) {
+  # get the object
+  df <- get(obj_name)
+  
+  # Convert country variable if it exists
+  if("country" %in% names(df)) {
+    df$country <- as.character(as_factor(df$country))
+  }
+  
+  # give them a chr round indicator
+  df$round <- "2"
+  
+  # Renaming vars
+  df$sex <- df$dem01
+  df$year_s <- df$intdatey # FIXED issue - I recoded it as survey_s before
+  df$born_y <- df$dem02y
+  df$isced_7 <- df$dem07isced
+  df$perswgt <- df$weight
+  
+  # Handle native: UK vs other countries
+  if(all(df$country == "United Kingdom", na.rm = TRUE)) {
+    # UK: use dem04a (4305 = outside UK)
+    df$native <- if_else(df$dem04a == 4305, 2, 1)
+  } else {
+    # Other countries: use dem03 (1 = within, 2 = outside)
+    df$native <- df$dem03
+  }
+  
+  df$edu_y <- df$dem08y
+  
+  # Selecting only necessary vars
+  df <- df |>  
+    select(
+      respid,
+      country,
+      round,
+      
+      year_s,
+      born_y,
+      sex,
+      native,
+      
+      isced_7,
+      edu_y,
+      
+      # Still to be harmonised in the next step
+      dem21,
+      dem28a,
+      dem28by,
+      dem30a,
+      dem30by,
+      
+      lhi01,
+      lhi02,
+      
+      lhi04_y1:lhi04_y10,
+      lhi05a_1:lhi05a_10,
+      lhi05b_y1:lhi05b_y10,
+      
+      lhi13_1:lhi13_10,
+      lhi14_y1:lhi14_y10,
+      
+      perswgt
+    ) |> 
+    # Netherlands already has 2 surveys in harmonized histories
+    mutate(round = if_else(country == "Netherlands", "3", round))
+  
+  # Assign back to the environment
+  assign(obj_name, df, envir = .GlobalEnv)
+}
+```
+
+Now to process the partnership histories I'll be working with these vars:
+
+-   dem21 - resp. has partner
+
+-   dem28a - married to partner dem28by - year married
+
+-   dem30a - living with partner dem30by - year started living together
+
+-   lhi01 -lived ever with a partner
+
+-   lhi02 - number of previous partnerships
+
+-   lhi04_y1:10 - years began cohabiting
+
+-   lhi05a_1:10 - married?
+
+-   lhi05b_y1:10 - married year
+
+-   lhi13_1:10 - how it ended
+
+-   lhi14_y1:10 - year it ended
+
+```{r relationship-histories}
+# join up all the dfs
+hh4_rough <- 
+  add_rows(france_round2.dta, netherlands_round2.dta, sweden_round2.dta) |> 
+  rename(
+    # current partnerships
+    union_11 = dem30a,
+    union_y11 = dem30by,
+    marr_11 = dem28a,
+    marr_y11 = dem28by
+  ) |> 
+  
+  # renaming partnership history vars
+  rename_with(~ str_replace(.x, "^lhi05a_", "marr_"), # married?
+              starts_with("lhi05a_")) |> 
+  rename_with(~ str_replace(.x, "^lhi05b_", "marr_"), # date of marriage?
+              starts_with("lhi05b_")) |> 
+  rename_with(~ str_replace(.x, "^lhi04_", "union_"), # date of cohabitation?
+              starts_with("lhi04_")) |>
+  rename_with(~ str_replace(.x, "^lhi13_", "sep_"), # separated?
+              starts_with("lhi13_")) |> 
+  rename_with(~ str_replace(.x, "^lhi14_", "sep_"), # date of separation?
+              starts_with("lhi14_")) |>
+  
+  mutate(
+    # hasn't separated partner with which they are currently living or has no cohabiting partner
+    sep_11 = if_else(union_11 == 1, 0, NA),
+    sep_y11 = NA
+  ) |> 
+  
+  # creating an in union indicator (I'm lazy and a researcher so I'll just write shit code)
+  mutate(
+    union_1 = as.numeric(1 <= lhi02),
+    union_2 = as.numeric(2 <= lhi02),
+    union_3 = as.numeric(3 <= lhi02),
+    union_4 = as.numeric(4 <= lhi02),
+    union_5 = as.numeric(5 <= lhi02),
+    union_6 = as.numeric(6 <= lhi02),
+    union_7 = as.numeric(7 <= lhi02),
+    union_8 = as.numeric(8 <= lhi02),
+    union_9 = as.numeric(9 <= lhi02),
+    union_10 = as.numeric(10 <= lhi02)
+  ) |> 
+  
+  # some relocations at the end
+  relocate(union_1:union_10, .after = lhi02) |> 
+  relocate(union_11, .after = union_10) |> 
+  relocate(marr_11, .after = marr_10) |> 
+  relocate(marr_y11, .after = marr_y10)
+
+# Putting all the relationships indicators into the right place
+hh4_long <- hh4_rough |> 
+  
+  select(-starts_with("union_"), -starts_with("sep_"), -starts_with("marr_y")) |> 
+  
+  # Marriages to long
+  pivot_longer(
+    cols = marr_1:marr_11,
+    names_to = "order",
+    names_prefix = "marr_",
+    values_to = "married"
+  ) |>
+  # separate pivot for the years and join them up
+  left_join(
+    hh4_rough |>
+      pivot_longer(
+        cols = marr_y1:marr_y11,
+        names_to = "order",
+        names_prefix = "marr_y",
+        values_to = "year"
+      ) |> 
+      select(respid, order, year),
+    by = c("respid", "order")
+  )  |>
+  
+  # Unions to long
+  left_join(
+    hh4_rough |> 
+      pivot_longer(
+        cols = union_1:union_11,
+        names_to = "order",
+        names_prefix = "union_",
+        values_to = "in_union"
+      ) |> 
+      select(respid, order, in_union),
+    by = c("respid", "order")
+  ) |>
+  # separate pivot for the years and join them up
+  left_join(
+    hh4_rough |>
+      pivot_longer(
+        cols = union_y1:union_y11,
+        names_to = "order",
+        names_prefix = "union_y",
+        values_to = "year_start"
+      ) |> 
+      select(respid, order, year_start),
+    by = c("respid", "order")
+  ) |> 
+  
+  # separations
+  left_join(
+    hh4_rough |>
+      pivot_longer(
+        cols = sep_1:sep_11,
+        names_to = "order",
+        names_prefix = "sep_",
+        values_to = "separated"
+      ) |> 
+      select(respid, order, separated),
+    by = c("respid", "order")
+  ) |>
+  left_join(
+    hh4_rough |>
+      pivot_longer(
+        cols = sep_y1:sep_y11,
+        names_to = "order",
+        names_prefix = "sep_y",
+        values_to = "year_end"
+      ) |> 
+      select(respid, order, year_end),
+    by = c("respid", "order")
+  ) |> 
+  mutate(order = as.numeric(order))
+
+# back to wide
+hh4_wide <- hh4_long |> 
+  group_by(respid) |>
+  arrange(order, .by_group = TRUE) |>
+  mutate(
+    # Count how many actual unions there are (excluding order 11)
+    num_unions = sum(in_union == 1 & order != 11, na.rm = TRUE),
+    # The next position should be num_unions + 1
+    next_position = num_unions + 1
+  ) |>
+  # Remove the row that will be replaced by order 11
+  filter(!(order == next_position & order != 11)) |>
+  # Replace order 11 with next_position
+  mutate(order = ifelse(order == 11, next_position, order)) |>
+  select(-num_unions, -next_position) |>
+  arrange(order, .by_group = TRUE) |>
+  ungroup() |> 
+  mutate(
+    married = case_when(
+      married == 1 ~ 1,  # "Yes" becomes 1
+      married == 2 ~ 0,  # "No" becomes 0
+      married == 3 ~ NA_real_,  # NA stays NA
+      married == 10 ~ NA_real_, # "Does not apply" becomes NA
+      TRUE ~ married  # keeps any other values
+    )
+  ) |> 
+  mutate(
+    in_union = case_when(
+      in_union == 1 ~ 1,  # "Yes" becomes 1
+      in_union == 2 ~ 0,  # "No" becomes 0
+      in_union == 3 ~ NA_real_,  # NA stays NA
+      in_union == 10 ~ NA_real_, # "Does not apply" becomes NA
+      TRUE ~ in_union  # keeps any other values
+    )
+  ) |> 
+  pivot_wider(
+    id_cols = c(respid, country, round, sex, native, edu_y, year_s, born_y, isced_7, dem21, lhi01, perswgt, lhi02),
+    names_from = order,
+    values_from = c(married, year, in_union, year_start, separated, year_end),
+    names_sep = "_"
+  ) |> 
+  rename_with(~ str_replace(.x, "^married_", "marr_"), starts_with("married_")) |>
+  rename_with(~ str_replace(.x, "^year_start_", "union_y"), starts_with("year_start_")) |>
+  rename_with(~ str_replace(.x, "^year_end_", "sep_y"), starts_with("year_end_")) |>
+  rename_with(~ str_replace(.x, "^year_", "marr_y"), starts_with("year_")) |>
+  rename_with(~ str_replace(.x, "^in_union_", "union_"), starts_with("in_union_")) |>
+  rename_with(~ str_replace(.x, "^separated_", "sep_"), starts_with("separated_")) |> 
+  select(-ends_with("11")) |> 
+  
+  # fixing isced_7 FIX - all 8 and 7 should just become 6
+  
+  mutate(
+    isced_7 = case_when(
+      isced_7 == 8 ~ 6,
+      isced_7 == 7 ~ 6,
+      isced_7 == 1401 ~ NA_real_,
+      TRUE ~ isced_7
+    )
+  )
+
+# remove intermediate objects
+rm(list = ls(pattern = "^hh4")[ls(pattern = "^hh4") != "hh4_wide"])
+rm(list = ls(pattern = "\\.dta$"))
+rm(df)
+```
+
+## Final edits
+
+```{r export}
+hh4 <- hh4_wide
+```

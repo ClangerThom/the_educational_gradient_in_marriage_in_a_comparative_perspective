@@ -4,9 +4,11 @@ format: html
 editor: visual
 ---
 
-## Known issues
+## Instructions
 
--   ISLED coding scheme is incomplete
+-   RUN harmonisation before running this script
+
+## Known issues
 
 -   UK BHPS has 3500 respondents with a personal weight of 0
 
@@ -16,13 +18,13 @@ editor: visual
 
 ## List of countries that need harmonisation
 
--   [ ] France GGS round 2
+-   [x] France GGS round 2
 
--   [ ] Sweden GGS round 2
+-   [x] Sweden GGS round 2
 
--   [ ] Netherlands GGS round 2
+-   [x] Netherlands GGS round 2
 
-I harmonised in a bunch more, but I was just dumb and Claudius had already done it and I just hadn't noticed it.
+I harmonised in a bunch more in an old version, but I was just dumb and Claudius Garten from NIDI had already done it and I just hadn't noticed it.
 
 ## Initial setup
 
@@ -57,9 +59,6 @@ hh3 <- read_dta(paste0(data_path, "/harmonized_histories_II.dta")) |> clean_name
 # appending them all onto each other with sjmisc to preserve labels
 # the labels diverge with hhII, it throws up a lot of warnings, so that's why I silence them
 rough_df <- add_rows(hh1, hh2, hh3, id = "source_dataset")
-
-# unload intermediate massive dfs
-rm(list = ls(pattern = "^hh"))
 ```
 
 ## Cleaning micro-data
@@ -136,6 +135,17 @@ micro_clean <- rough_df |>
 
 # unloading previous dataset
 rm(rough_df)
+```
+
+## Adding in final harmonised dataset
+
+```{r add-hh4}
+micro_clean <- micro_clean |> 
+  mutate(respid = as.character(respid)) |> 
+  add_rows(hh4, id = "harmonised")
+
+# unload intermediate massive dfs
+rm(list = ls(pattern = "^hh"))
 ```
 
 ## Isled recode
