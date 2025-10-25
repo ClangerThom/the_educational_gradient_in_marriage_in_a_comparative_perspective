@@ -7,6 +7,9 @@ editor: visual
 ## Initial setup
 
 ```{r packages}
+#| warning: false
+#| message: false
+
 # General functionality
 library(tidyverse)
 
@@ -73,7 +76,7 @@ lf_rate_ilo_modeled <- lf_rate_ilo_modeled_raw |>
     TRUE ~ country  # Keep all other values as they are
   )) |>
   # pulling my countries
-  filter(country %in% unique(analysis_long_controls$country)) |> 
+  filter(country %in% unique(micro_clean$country)) |> 
   # pulling appropriate age band
   filter(classif1.label == "Age (Youth, adults): 15-64") |> 
   # filtering out total lfp
@@ -324,4 +327,88 @@ macro_indicators <-
       rename(male_lfp_rate = obs_value),
     by = join_by(country, time)
   )
+
+# removing intermediate dfs
+rm(lf_rate_combined)
+rm(relative_earnings_index)
+rm(unemployment_index)
 ```
+
+## Value measures
+
+I learned a new thing here - you can rename columns directly inside select (newname = oldname).
+
+I load in the IVS (EVS + WVS) full time-series into R and pick out variables of interest.
+
+```{r IVS}
+# load in integrated values survey (created with a stata script from GESIS)
+gender_role_attitudes_raw <- 
+  read_dta(paste0(data_path, "/macro/Integrated_values_surveys_1981-2022.dta")) |> 
+  clean_names("snake") |> 
+  
+  # Variable selection
+  select(
+    # respid
+    respid = s007_01,
+    
+    # details about the study and country
+    studyno,
+    time = s020, # study year
+    s009,
+    
+    # weights
+    s017,
+    s018,
+    s019,
+    pwght,
+    
+    # indicators
+    
+    # gender role attitudes
+    housewife = d057, # Being a housewife just as fulfilling
+    equal_contribution = d058, # Husband and wife should both contribute to income
+    men_political_leader = d059, # Men make better political leaders than women do
+    university_for_boys = d060, # University is more important for a boy than for a girl
+    pre-school_suffer = d061, # Pre-school child suffers with working mother
+    women_want_home = d062, # Women want a home and children
+    women_job_indep = d063, # Job best way for women to be independent (4 categories)
+    
+    # family diversity acceptance
+    child_needs_mum_dad = d018, # Child needs a home with father and mother
+    woman_children_fulfilled = d019, # A woman has to have children to be fulfilled
+    fathers_good_with_children = d064, # Fathers are well suited for looking after children
+    
+    # interesting
+    marriage_outdated = d022 # Marriage is an out-dated institution
+  ) |> 
+  
+  # GB and North Ireland are separated, I'm going to squish them together
+  mutate(s009 = case_when(
+    s009 == "NIR" ~ "GB",
+    str_detect(s009, "^GB-") ~ "GB",
+    TRUE ~ S009
+  )) |> 
+  
+  # getting country names
+  mutate(
+    country = countrycode(s009, "iso2c", "country.name"),
+    .before = everything()
+  ) |> 
+  
+  # filter for countries in my analysis
+  filter(country %in% unique(micro_clean$country))
+```
+
+#### Family diversity acceptance
+
+```{r family-diversity-acceptance}
+
+```
+
+#### Gender role attitudes
+
+```{r gender role attitudes}
+
+```
+
+## Finishing touches - interpolation of missing values
