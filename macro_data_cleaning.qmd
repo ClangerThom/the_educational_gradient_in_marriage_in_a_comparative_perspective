@@ -1,0 +1,105 @@
+---
+title: "macro_data_cleaning"
+format: html
+editor: visual
+---
+
+## Initial setup
+
+```{r packages}
+# General functionality
+library(tidyverse)
+
+# For importing the data
+library(sjmisc)
+library(haven)
+library(janitor)
+library(countrycode)
+library(stringr)
+
+#for pulling the data from the websites
+library(WDI)
+library(eurostat)
+library(OECD)
+library(jsonlite)
+```
+
+## ILO Labour Force Participation Rate
+
+I'm pulling the national survey results with ILO modeled estimates filling them in.
+
+```{r}
+lf_rate_ilo_raw <- read.csv("https://rplumber.ilo.org/data/indicator/?id=EAP_DWAP_SEX_AGE_RT_A&lang=en&type=label&format=.csv&channel=ilostat&title=labour-force-participation-rate-by-sex-and-age-annual")
+
+lf_rate_ilo <- lf_rate_ilo_raw |> 
+  tibble() |> 
+  mutate(country = ref_area.label,
+         indicator = indicator.label,
+         source = source.label,
+         age = classif1.label,
+         sex = sex.label) |>
+  mutate(
+    country = case_when(
+    country == "United Kingdom of Great Britain and Northern Ireland" ~ "United Kingdom",
+    country == "United States of America" ~ "United States",
+    country == "Republic of Moldova" ~ "Moldova",
+    country == "Russian Federation" ~ "Russia",
+    TRUE ~ country  # Keep all other values as they are
+  )) |> 
+  # pulling my countries
+  filter(country %in% unique(micro_clean$country)) |> 
+  # pulling appropriate age band
+  filter(classif1.label == "Age (Youth, adults): 15-64") |> 
+  # filtering out total lfp
+  filter(sex.label != "Total") |> 
+  select(country, indicator, sex, age, time, obs_value, source) |> 
+  arrange(country, sex, age, time)
+
+lf_rate_ilo_modeled_raw <- read.csv("https://rplumber.ilo.org/data/indicator/?id=EAP_2WAP_SEX_AGE_RT_A&lang=en&type=label&format=.csv&channel=ilostat&title=labour-force-participation-rate-by-sex-and-age-ilo-modelled-estimates-annual")
+
+lf_rate_ilo_modeled <- lf_rate_ilo_modeled_raw |> 
+  tibble() |> 
+  mutate(country = ref_area.label,
+         indicator = indicator.label,
+         source = source.label,
+         age = classif1.label,
+         sex = sex.label) |>
+  mutate(
+    country = case_when(
+    country == "United Kingdom of Great Britain and Northern Ireland" ~ "United Kingdom",
+    country == "United States of America" ~ "United States",
+    country == "Republic of Moldova" ~ "Moldova",
+    country == "Russian Federation" ~ "Russia",
+    TRUE ~ country  # Keep all other values as they are
+  )) |>
+  # pulling my countries
+  filter(country %in% unique(analysis_long_controls$country)) |> 
+  # pulling appropriate age band
+  filter(classif1.label == "Age (Youth, adults): 15-64") |> 
+  # filtering out total lfp
+  filter(sex.label != "Total") |> 
+  select(country, indicator, sex, age, time, obs_value, source) |> 
+  arrange(country, sex, age, time)
+
+# Now I have to fill in the gaps with the modelled estimates
+# filled in the gaps with modelled estimates
+
+lf_rate_combined <- lf_rate_ilo |>
+  bind_rows(
+    lf_rate_ilo_modeled |>
+      anti_join(lf_rate_ilo, by = c("country", "time"))
+  ) |> 
+  arrange(country, sex, age, time)
+
+# remove intermediates
+rm(lf_rate_ilo_raw)
+rm(lf_rate_ilo_modeled_raw)
+rm(lf_rate_ilo)
+rm(lf_rate_ilo_modeled)
+```
+
+## ILO unemployment by education
+
+```{r unemployment-by-education}
+
+```
