@@ -4,6 +4,12 @@ format: html
 editor: visual
 ---
 
+## To-do
+
+-   Re-do the relative female lfp - check you know both male and female lfp in every case, then calculate, standardise, then interpolate
+
+-   Also standardise the educational advantage indicators - think about what it does
+
 ## Initial setup
 
 ```{r packages}
@@ -25,6 +31,9 @@ library(WDI)
 library(eurostat)
 library(OECD)
 library(jsonlite)
+
+# load file paths
+source("config.R")
 ```
 
 ## ILO Labour Force Participation Rate
@@ -369,7 +378,7 @@ gender_role_attitudes_raw <-
     equal_contribution = d058, # Husband and wife should both contribute to income
     men_political_leader = d059, # Men make better political leaders than women do
     university_for_boys = d060, # University is more important for a boy than for a girl
-    pre-school_suffer = d061, # Pre-school child suffers with working mother
+    preschool_suffer = d061, # Pre-school child suffers with working mother
     women_want_home = d062, # Women want a home and children
     women_job_indep = d063, # Job best way for women to be independent (4 categories)
     
@@ -386,7 +395,7 @@ gender_role_attitudes_raw <-
   mutate(s009 = case_when(
     s009 == "NIR" ~ "GB",
     str_detect(s009, "^GB-") ~ "GB",
-    TRUE ~ S009
+    TRUE ~ s009
   )) |> 
   
   # getting country names
@@ -402,13 +411,161 @@ gender_role_attitudes_raw <-
 #### Family diversity acceptance
 
 ```{r family-diversity-acceptance}
-
+family_diversity_acceptance <- 
+  gender_role_attitudes_raw |> 
+  
+  # need to reverse scales to get desired interpretation
+  mutate(
+    rev_child_needs_mum_dad = case_when(
+      child_needs_mum_dad == 0 ~ 1,
+      child_needs_mum_dad == 1 ~ 0,
+      TRUE ~ NA
+    ),
+    
+    rev_woman_children_fulfilled = case_when(
+      woman_children_fulfilled == 0 ~ 1,
+      woman_children_fulfilled == 1 ~ 0,
+      TRUE ~ NA
+    ),
+    
+    rev_fathers_good_with_children = if_else(
+      !is.na(fathers_good_with_children),
+      5 - fathers_good_with_children,
+      NA
+    )
+  ) |> 
+  
+  # naive assumption missing person weight is equal to 1
+  mutate(perswgt = if_else(is.na(pwght), 1, pwght)) |> 
+  
+  # obtain weighted mean attitudes within country and year
+  group_by(country,time) |> 
+  summarise(
+    mean_child_needs_mum_dad = weighted.mean(rev_child_needs_mum_dad, perswgt, na.rm = TRUE),
+    mean_woman_children_fulfilled = weighted.mean(rev_woman_children_fulfilled, perswgt, na.rm = TRUE),
+    mean_fathers_children = weighted.mean(rev_fathers_good_with_children, perswgt, na.rm = TRUE)
+  ) |> 
+  
+  ungroup() |> 
+  
+  # standardisation
+  mutate(
+    std_child_needs_mum_dad = scale(mean_child_needs_mum_dad)[,1],
+    std_woman_children_fulfilled = scale(mean_woman_children_fulfilled)[,1],
+    std_fathers_children = scale(mean_fathers_children)[,1]
+  ) |> 
+  
+  # summing into an index, filled proportionally if 1 of the items was missing
+  mutate(
+    n_items = rowSums(!is.na(pick(starts_with("std")))),
+    
+    family_diversity_acceptance = case_when(
+      n_items == 3 ~ std_child_needs_mum_dad + std_woman_children_fulfilled + std_fathers_children,  # complete: use sum
+      n_items == 2 ~ rowSums(pick(starts_with("std")), na.rm = TRUE) * (3/2),  # prorate
+      TRUE ~ NA  # 0 or 1 items: set to missing
+    )
+  ) |> 
+  
+  # clean up helper variable and extra rows
+  select(-n_items, -starts_with("mean"), -starts_with("std")) |> 
+  filter(!is.na(family_diversity_acceptance))
 ```
 
 #### Gender role attitudes
 
 ```{r gender role attitudes}
-
+# these go from traditional to progressive
+gender_roles <- 
+  gender_role_attitudes_raw |> 
+  
+  # naive assumption missing person weight is equal to 1
+  mutate(perswgt = if_else(is.na(pwght), 1, pwght)) |>
+  
+  # weighted means of index components
+  group_by(country, time) |> 
+  summarise(
+    mean_housewife_fulfilling = mean(housewife, perswgt, na.rm = TRUE),
+    mean_political_leader = mean(men_political_leader, perswgt, na.rm = TRUE),
+    mean_university = mean(university_for_boys, perswgt, na.rm = TRUE),
+    mean_women_want_home = mean(women_want_home, na.rm = TRUE)
+  ) |> 
+  
+  ungroup() |> 
+  
+  # standardise
+  mutate(across(
+    .cols = starts_with("mean_"),
+    .fns = ~scale(.)[,1],
+    .names = "{str_replace(.col, 'mean_', 'std_')}"
+  )) |> 
+  
+  # if 1 is missing I fill in the scale proportionally
+  mutate(
+    n_items = rowSums(!is.na(pick(starts_with("std")))),
+    gender_roles = case_when(
+      n_items == 4 ~ std_housewife_fulfilling + std_political_leader + std_university + std_women_want_home,  # complete: use sum
+      n_items == 3 ~ rowSums(pick(starts_with("std")), na.rm = TRUE) * (4/3),  # prorate
+      TRUE ~ NA  # 0 or 1 or 2 items: set to missing
+    )
+  ) |>
+  # clean up helper variable and extra rows
+  select(-n_items, -starts_with("mean"), -starts_with("std")) |> 
+  filter(!is.na(gender_roles))
 ```
 
 ## Finishing touches - interpolation of missing values
+
+```{r export-to-analysis}
+# adding macro_indicators
+macro_indicators_interpolated <- macro_indicators |> 
+  full_join(family_diversity_acceptance, by = join_by(country, time)) |> 
+  full_join(gender_roles, by = join_by(country, time)) |> 
+  
+  # fill in rows for all countries
+  group_by(country) |> 
+  complete(time = min(time):2024) |> 
+  
+  # interpolation between timepoints
+  mutate(
+    female_lfp_rate = approx(time, female_lfp_rate, xout = time, rule = 1)$y,
+    male_lfp_rate = approx(time, male_lfp_rate, xout = time, rule = 1)$y,
+    relative_lfp = female_lfp_rate/male_lfp_rate,
+    
+    educ_unemployment_advantage = if(sum(!is.na(educ_unemployment_advantage)) >= 2) {
+      approx(time, educ_unemployment_advantage, xout = time, rule = 1)$y
+    } else {
+      educ_unemployment_advantage
+    },
+    
+    educ_earnings_advantage = if(sum(!is.na(educ_earnings_advantage)) >= 2) {
+      approx(time, educ_earnings_advantage, xout = time, rule = 1)$y
+    } else {
+      educ_earnings_advantage
+    },
+    
+    
+    family_diversity_acceptance = if(sum(!is.na(family_diversity_acceptance)) >= 2) {
+      
+      approx(time, family_diversity_acceptance, xout = time, rule = 1)$y
+    } else {
+      family_diversity_acceptance
+    },
+    
+    gender_roles = if(sum(!is.na(gender_roles)) >= 2) {
+      
+      approx(time, gender_roles, xout = time, rule = 1)$y
+    } else {
+      gender_roles
+    },
+    )|> 
+  ungroup()
+```
+
+Finally, just remove the intermediate dfs.
+
+```{r removal}
+rm(macro_indicators)
+rm(gender_role_attitudes_raw)
+rm(gender_roles)
+rm(family_diversity_acceptance)
+```
