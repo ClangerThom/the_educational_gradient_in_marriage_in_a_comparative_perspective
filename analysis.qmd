@@ -1,0 +1,35 @@
+---
+title: "analysis"
+format: html
+editor: visual
+---
+
+## Initial setup
+
+```{r library}
+# General functionality
+library(tidyverse)
+library(flextable)
+library(officer)
+
+# For importing the data
+library(sjmisc)
+library(haven)
+library(janitor)
+library(countrycode)
+
+# model evaluation
+library(broom)
+library(marginaleffects)
+library(sandwich)
+library(lmtest)
+
+# possible speeding up models
+library(speedglm)
+
+# meta-regression
+library(metafor)
+
+# MAAS from speedglm messes with this
+select <- dplyr::select
+```

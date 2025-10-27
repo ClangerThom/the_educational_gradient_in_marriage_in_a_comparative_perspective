@@ -184,7 +184,7 @@ isled_coding <- read_csv(paste0(data_path, "/isled_me.csv")) |>
   ) |> 
   
   # tidying the codebook - putting it into long format for left_join() later
-  select(-`isled_7 (0+1+2)`, -`isled_8 (5+6)`, -`isled_9 (3+4)`) %>% 
+  select(-`isled_7 (0+1+2)`, -`isled_8 (5+6)`, -`isled_9 (3+4)`) |> 
   pivot_longer(
     cols = starts_with("isled"),
     names_to = "isced_7",
@@ -228,9 +228,9 @@ This is computationally very demanding, the resulting df has over 4 million rows
 
 New approach compared to my original document:
 
-1.   Create person-marriage df.
-2.   Cut out the extra marriages after the first.
-3.   Join these by respid (need a new unique identfier)
+1.  Create person-marriage df.
+2.  Cut out the extra marriages after the first.
+3.  Join these by respid (need a new unique identfier)
 
 ```{r identify-first-marriage}
 marriage_order <- micro_clean |> 
@@ -329,8 +329,6 @@ analysis <- micro_clean |>
   relocate(event, .after = married) |> 
   ungroup()
 
-# write.csv(analysis, file = paste0(data_path, "/intermediate_output/analysis.csv"))
-
 rm(marriage_order)
 ```
 
@@ -422,12 +420,56 @@ analysis <- analysis |>
   group_by(respid) |> 
   
   # Condition that they had to be cohabiting at least a full year before marriage
-  mutate(in_union = ifelse(event == 1 & (is.na(lag(in_union)) | lag(in_union) == 0), 0, in_union)) |> 
+  mutate(in_union = if_else(event == 1 & (is.na(lag(in_union)) | lag(in_union) == 0), 0, in_union)) |> 
   ungroup()
 ```
 
 ## Additional controls
 
 ```{r finalise-for-analysis}
+analysis <- analysis |> 
+  
+  # Imputing age at finishing school by taking the median school leaving age in each country-isled combo
+  group_by(country, isled) |> 
+  mutate(
+    median_age_edu_y = median(iedu_y - born_y, na.rm = TRUE),
+    iedu_y_mod = born_y + median_age_edu_y
+  ) |> 
+  relocate(median_age_edu_y, .after = iedu_y) |> 
+  relocate(iedu_y_mod, .after = iedu_y) |>
+  
+   # modified enrolment indicator
+  mutate(
+    iedu_y = if_else(is.na(iedu_y), edu_y, iedu_y),
+    enrol_mod = case_when(
+      is.na(iedu_y) &  iedu_y_mod >= year ~ 1,
+      is.na(iedu_y) &  iedu_y_mod < year ~ 0,
+      iedu_y >= year ~ 1,
+      iedu_y < year ~ 0,
+      .default = NA
+    )
+  ) |> 
+  relocate(enrol_mod, .after = age_s)
+```
 
+## Selection of respondents for analysis
+
+```{r selection}
+analysis_select <- analysis |> 
+  
+  filter(age_s < 66) |> 
+  mutate(
+    foreign_born = case_when(
+      native == 1 ~ 0,
+      native == 2 ~ 1,
+      TRUE ~ NA
+    ),
+    male = case_when(
+      sex == 1 ~ 1,
+      sex == 2 ~ 0,
+      TRUE ~ NA
+    )
+  )
+
+# write.csv(analysis, file = paste0(data_path, "/intermediate_output/analysis.csv"))
 ```
