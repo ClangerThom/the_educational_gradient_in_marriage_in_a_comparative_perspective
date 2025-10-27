@@ -515,11 +515,30 @@ gender_roles <-
 
 ## Finishing touches - interpolation of missing values
 
+Note for the future - the approach of other studies is to
+
+1\) interpolate the values from one source
+
+2\) then add any missing gaps with other source BUT
+
+3\) do so through a linear model with country-intercepts and full-information maximum likelihood estimation in order to correct for scale differences (e. g. estimate the prediction of what the value would be in the original data source given the information from the other data source (e. g. the other source systematically undervalues the variable compared to the first source))
+
 ```{r export-to-analysis}
 # adding macro_indicators
 macro_indicators_interpolated <- macro_indicators |> 
   full_join(family_diversity_acceptance, by = join_by(country, time)) |> 
   full_join(gender_roles, by = join_by(country, time)) |> 
+  
+  #standardise the economic vars
+  mutate(
+    relative_lfp = female_lfp_rate/male_lfp_rate,
+    
+    std_relative_lfp = scale(relative_lfp)[,1],
+    std_educ_unemployment_advantage = scale(educ_unemployment_advantage)[,1],
+    std_educ_earnings_advantage = scale(educ_earnings_advantage)[,1],
+  ) |> 
+  
+  select(-relative_lfp) |> 
   
   # fill in rows for all countries
   group_by(country) |> 
@@ -527,20 +546,18 @@ macro_indicators_interpolated <- macro_indicators |>
   
   # interpolation between timepoints
   mutate(
-    female_lfp_rate = approx(time, female_lfp_rate, xout = time, rule = 1)$y,
-    male_lfp_rate = approx(time, male_lfp_rate, xout = time, rule = 1)$y,
-    relative_lfp = female_lfp_rate/male_lfp_rate,
+    std_relative_lfp = approx(time, std_relative_lfp, xout = time, rule =1)$y,
     
-    educ_unemployment_advantage = if(sum(!is.na(educ_unemployment_advantage)) >= 2) {
-      approx(time, educ_unemployment_advantage, xout = time, rule = 1)$y
+    std_educ_unemployment_advantage = if(sum(!is.na(std_educ_unemployment_advantage)) >= 2) {
+      approx(time, std_educ_unemployment_advantage, xout = time, rule = 1)$y
     } else {
-      educ_unemployment_advantage
+      std_educ_unemployment_advantage
     },
     
-    educ_earnings_advantage = if(sum(!is.na(educ_earnings_advantage)) >= 2) {
-      approx(time, educ_earnings_advantage, xout = time, rule = 1)$y
+    std_educ_earnings_advantage = if(sum(!is.na(std_educ_earnings_advantage)) >= 2) {
+      approx(time, std_educ_earnings_advantage, xout = time, rule = 1)$y
     } else {
-      educ_earnings_advantage
+      std_educ_earnings_advantage
     },
     
     
