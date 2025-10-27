@@ -10,6 +10,16 @@ editor: visual
 
 ## Known issues
 
+Personal issues:
+
+-   UK BHPS has a "left-truncated" marriage indicator -\> find out what it means
+
+Issues with the dataset:
+
+-   A new unique identifier is needed, since respid from Czechia round 2 overlaps with respids of Estonia and Italy round 2
+
+    -   Solved for now by generating a new respid based on rownumber
+
 -   UK BHPS has 3500 respondents with a personal weight of 0
 
 -   Kazakhstan is disappearing despite officially being in harmonized_histories_I
@@ -193,22 +203,227 @@ micro_clean <-
 # relocate needed a new pipe
 micro_clean <- micro_clean |> 
   relocate(isled, .after = isced_7)
+
+rm(isled_coding)
 ```
+
+## Create new respid
+
+The prepackaged one contains duplicates between different countries
+
+```{r respid-fix}
+micro_clean <- micro_clean |> 
+  mutate(respid = row_number())
+```
+
+## Add macrodata
+
+-   Please run the macrodata file now.
 
 ## Expansion into long-format
 
-This is computationally very demanding, the resulting df has over 4 million rows. Make sure you have a powerful computer or be prepared to sit for a loooooong time.
+This is computationally very demanding, the resulting df has over 4 million rows. Make sure you have a powerful computer or be prepared to sit for a loooooong time
 
 ## Identifying 1st marriage
 
-```{r identify-first-marriage}
+New approach compared to my original document:
 
+1.   Create person-marriage df.
+2.   Cut out the extra marriages after the first.
+3.   Join these by respid (need a new unique identfier)
+
+```{r identify-first-marriage}
+marriage_order <- micro_clean |> 
+  select(respid, marr_1:marr_10) |> 
+  pivot_longer(
+    cols = marr_1:marr_10,
+    names_to = "order",
+    names_prefix = "marr_",
+    values_to = "married"
+  ) |> 
+  left_join(
+    micro_clean |> 
+      select(respid, marr_y1:marr_y10) |> 
+      pivot_longer(
+        cols = marr_y1:marr_y10,
+        names_to = "order",
+        names_prefix = "marr_y",
+        values_to = "year"
+      ),
+    by = c("respid", "order")
+  ) |> 
+  
+  group_by(respid) |> 
+  filter(
+    # keep marriages
+    married == 1 |
+    # or keep first row if there are none
+    (all(is.na(married) | married != 1) & row_number() == 1)
+  ) |> 
+  # If there are multiple marraiges, keep only the first one
+  slice(1) |> 
+  ungroup() |> 
+  
+  mutate(
+    married = if_else(is.na(married), 0, married)
+  )
+
+write.csv(marriage_order, file = paste0(data_path, "/intermediate_output/marriage_order.csv"))
+```
+
+## Pivot to long
+
+```{r long-format}
+analysis <- micro_clean |> 
+  select(-starts_with("marr_"), -starts_with("union_"), -starts_with("sep_"), -starts_with("ltunion"), -starts_with("ltmarr_"), -starts_with("div_")) |> 
+  
+  left_join(
+    marriage_order,
+    by = join_by("respid")
+  ) |> 
+  
+  mutate(
+    duration = case_when(
+      # married and did that within age 41
+      year - born_y < 41 & married == 1 ~ year - born_y - 15 + 1,
+      # I add the 1 because duration 0 means they got married in the same year they entered risk, but I still need that observation
+      
+      # didn't marry within age 41
+      year_s - born_y < 41 & married == 0 ~ year_s - born_y - 15 + 1,
+      
+      # didn't marry and older than age 41 at date of interview
+      year_s - born_y > 40 ~ 26, # FIX not sure if 26 or 27
+      
+      .default = NA
+    ),
+    
+    age_marr = year - born_y,
+    age_s = year_s - born_y
+  ) |> 
+  relocate(order:age_s, .after = born_y) |> 
+  
+  # get rid of those who married before 15
+  filter(duration > 0) |> 
+  uncount(weights = duration) |> 
+  
+  # time variable and current year
+  group_by(respid) |> 
+  mutate(
+    time = row_number(),
+    obs_year = born_y + time - 1 + 15
+  ) |> 
+  ungroup() |>
+  
+  relocate(time:year, .after = year_s) |> 
+   
+  
+  # creating the dependent variable
+  group_by(respid) |> 
+  mutate(
+    event = if_else(
+      max(time) == time & married == 1,
+      1,
+      0
+    )
+  ) |> 
+  relocate(event, .after = married) |> 
+  ungroup()
+
+# write.csv(analysis, file = paste0(data_path, "/intermediate_output/analysis.csv"))
+
+rm(marriage_order)
 ```
 
 ## Cohabitation indicator
 
 ```{r construct-cohabitation-indicator}
 
+# expand it so each observation is respondent-union
+union_order <- micro_clean |>
+  select(respid, union_1:union_10, year_s) |> 
+  pivot_longer(
+    cols = union_1:union_10,
+    names_to = "order",
+    names_prefix = "union_",
+    values_to = "in_union"
+  ) |> 
+  
+  # separate pivot for for the years and join them up
+  left_join(
+    micro_clean |> 
+      select(respid, union_y1:union_y10) |> 
+      pivot_longer(
+        cols = union_y1:union_y10,
+        names_to = "order",
+        names_prefix = "union_y",
+        values_to = "year_start"
+      ),
+    by = c("respid", "order")
+  ) |> 
+  
+  # separations
+  left_join(
+    micro_clean |> 
+      select(respid, sep_1:sep_10) |> 
+      pivot_longer(
+        cols = sep_1:sep_10,
+        names_to = "order",
+        names_prefix = "sep_",
+        values_to = "separated"
+      ),
+    by = c("respid", "order")
+  ) |>  
+      
+  left_join(
+    micro_clean |> 
+      select(respid, sep_y1:sep_y10) |> 
+      pivot_longer(
+        cols = sep_y1:sep_y10,
+        names_to = "order",
+        names_prefix = "sep_y",
+        values_to = "year_end"
+      ),
+    by = c("respid", "order")
+  ) |> 
+  
+  group_by(respid) |> 
+  filter(cumsum(in_union == 0) < 2) |> # counts how many rows have a 0, once there's more than 1 they are filtered
+  filter(in_union == 1 | 
+         (in_union == 0 & lag(separated) == 1) | 
+         all(in_union == 0)) |>  
+  # keeps either observations with unions, or those that have a previous separation, or those where there are just 0 in respid
+  ungroup()
+
+write.csv(union_order, file = paste0(data_path, "/intermediate_output/union_order.csv"))
+
+person_union_year <- union_order |> 
+  filter(in_union == 1) |> 
+  mutate(spell = case_when(
+    separated == 0 ~ year_s - year_start + 1,
+    separated > 0 ~ year_end - year_start + 1
+  )) |> 
+  filter(!is.na(spell)) |> 
+  filter(!is.na(spell) & spell > 0)  |>  
+  uncount(weights = spell) |>
+  group_by(respid) |>  
+  mutate(
+    time = row_number(),
+    obs_year = year_start + time - 1
+  ) |>  
+  ungroup()  |>  
+  select(respid, in_union, obs_year)
+
+analysis <- analysis |> 
+  left_join(person_union_year, by = join_by(respid, obs_year))  |>
+  relocate(in_union, .after = event) |> 
+  mutate(
+    in_union = if_else(is.na(in_union), 0, in_union)
+  ) |> 
+  group_by(respid) |> 
+  
+  # Condition that they had to be cohabiting at least a full year before marriage
+  mutate(in_union = ifelse(event == 1 & (is.na(lag(in_union)) | lag(in_union) == 0), 0, in_union)) |> 
+  ungroup()
 ```
 
 ## Additional controls
