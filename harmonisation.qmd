@@ -20,16 +20,6 @@ library(janitor)
 library(countrycode)
 ```
 
-## List of countries that need harmonisation
-
--   [x] France GGS round 2
-
--   [x] Sweden GGS round 2
-
--   [x] Netherlands GGS round 2
-
-I harmonised in a bunch more in an old version, but I was just dumb and Claudius Garten from NIDI had already done it and I just hadn't noticed it.
-
 ## Loading in raw datasets
 
 ```{r raw-data}

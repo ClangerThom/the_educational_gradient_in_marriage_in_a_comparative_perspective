@@ -4,6 +4,18 @@ format: html
 editor: visual
 ---
 
+## Todo
+
+-   Review the cohorts
+
+## Known Issues
+
+-   The oldest Finnish cohort has perfect prediction, needs to be joined up somehow, then there are a bunch of extra cohorts that have too few marriages.
+
+-   UK has a bunch of 0 weight observations
+
+-   UK BHPS and German surveys have a lot of missing values on education
+
 ## Initial setup
 
 ```{r library}
@@ -32,4 +44,229 @@ library(metafor)
 
 # MAAS from speedglm messes with this
 select <- dplyr::select
+```
+
+## Preparation
+
+Consider whether you want to do winsorization
+
+```{r weights}
+analysis_select <- analysis_select |> 
+  mutate(
+    naive_perswgt = if_else(is.na(perswgt), 1, perswgt)
+  )
+```
+
+## Creation of country-cohorts and analytical sample
+
+```{r country-cohorts}
+analysis_proper <- analysis_select |>
+  
+  # add model covariates
+  drop_na(isled, time, enrol_mod, foreign_born, male, in_union) |>
+  
+  mutate(
+    marriage_cohort = born_y + 15, 
+    marriage_cohort_cat = case_when(
+      country == "Austria" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1985, 2006, by = 10), Inf),
+                          labels = c("Before 1985", "1985-1994", "1995-2005", "After 2005"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Belarus" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, 2014),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "2005-2014"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Belgium" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "After 1990"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Bulgaria" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "After 1990"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Czechia" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2003"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Denmark" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2003"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Estonia" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2003"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Finland" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2003"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "France" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2003"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Georgia" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "after 1990"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Italy" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2003"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Lithuania" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "after 1990"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Norway" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2003"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Romania" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "after 1990"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Russia" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "after 1990"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Spain" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2004"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Sweden" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2004"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "United Kingdom" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2004"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      country == "Uruguay" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2004"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      
+      country == "Canada" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 1991, by = 10), 2005, Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2004", "after 2004"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      
+      country == "Netherlands" ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 2011, by = 10), Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2000", "2001-2010", "After 2010"),
+                          right = FALSE,
+                          include.lowest = TRUE),
+      
+      # For any country I don't manually look at
+      TRUE ~ cut(marriage_cohort,
+                          breaks = c(-Inf, seq(1951, 2021, by = 10), Inf),
+                          labels = c("Before 1951", "1951-1960", "1961-1970", 
+                                     "1971-1980", "1981-1990", "1991-2000", 
+                                     "2001-2010", "2011-2020", "After 2020"),
+                          right = FALSE,
+                          include.lowest = TRUE)
+    ),
+    
+    country_cohort = paste0(country, "_", marriage_cohort_cat),
+    
+    # between country standardisation
+    isled_standard = scale(isled)[,1]
+  )
+```
+
+Country cohorts in need of being joined up
+
+```{r}
+analysis_proper |> group_by(country_cohort) |> count(event) |> filter(n<101)
+```
+
+## Connecting macro-indicators to country-cohorts
+
+```{r scoring-country-cohorts}
+macro_weighted <- analysis_proper |> 
+  group_by(country, country_cohort, obs_year) |> 
+  
+  # number of Rs observed each year
+  summarise(
+    pweight = sum(naive_perswgt),
+    .groups = "drop"
+  ) |> 
+  
+  group_by(country_cohort) |> 
+  
+  # total years observed within each country-cohort
+  mutate(
+    totpweight = sum(pweight),
+    oweight = pweight/totpweight, # percentage of union_years observed in each period
+    cumweight = cumsum(oweight) # cumulative share of union_years observed
+  ) |> 
+  ungroup() |>
+  dplyr::select(-pweight, -totpweight) |>
+   
+  
+  # add the interpolated macrodata (onto each year)
+  left_join(macro_indicators_interpolated |> rename(obs_year = time), by = c("country", "obs_year")) |> 
+  
+  group_by(country_cohort) |>
+  
+  # share of union years covered by each time series (e. g. 65% of union years experienced when the time series ends, and 35% of union were experienced by the time it began so in total the time series covers 30% of all union years experienced in a country-cohort - that being it's weight in the calculation then)
+  mutate(
+    across(
+      .cols = where(is.numeric) & !any_of(c("obs_year", "oweight", "cumweight")),
+      .fns = ~if(all(is.na(.))) 0 else 
+              max(cumweight[!is.na(.)], na.rm = TRUE) - 
+              min(cumweight[!is.na(.)], na.rm = TRUE),
+      .names = "cov_{.col}"
+    )
+  ) |>
+  ungroup() |>
+  
+  # aggregating the macro-level indicators for each country-cohort, weighted mean (years experienced by more respondents count for more)
+  group_by(country, country_cohort) |>
+  summarise(
+    across(
+      where(is.numeric) & !c(oweight, cumweight),
+      ~if(startsWith(cur_column(), "cov_")) first(.) else weighted.mean(., oweight, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  )
 ```

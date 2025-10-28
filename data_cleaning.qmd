@@ -437,15 +437,16 @@ analysis <- analysis |>
   ) |> 
   relocate(median_age_edu_y, .after = iedu_y) |> 
   relocate(iedu_y_mod, .after = iedu_y) |>
+  ungroup() |> 
   
    # modified enrolment indicator
   mutate(
     iedu_y = if_else(is.na(iedu_y), edu_y, iedu_y),
     enrol_mod = case_when(
-      is.na(iedu_y) &  iedu_y_mod >= year ~ 1,
-      is.na(iedu_y) &  iedu_y_mod < year ~ 0,
-      iedu_y >= year ~ 1,
-      iedu_y < year ~ 0,
+      is.na(iedu_y) &  iedu_y_mod >= obs_year ~ 1,
+      is.na(iedu_y) &  iedu_y_mod < obs_year ~ 0,
+      iedu_y >= obs_year ~ 1,
+      iedu_y < obs_year ~ 0,
       .default = NA
     )
   ) |> 
@@ -455,7 +456,9 @@ analysis <- analysis |>
 ## Selection of respondents for analysis
 
 ```{r selection}
-analysis_select <- analysis |> 
+analysis_select <- analysis |>
+  
+  select(-arid, -kishwgt, -hhwgt) |> 
   
   filter(age_s < 66) |> 
   mutate(

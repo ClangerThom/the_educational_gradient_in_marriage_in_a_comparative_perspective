@@ -538,7 +538,7 @@ macro_indicators_interpolated <- macro_indicators |>
     std_educ_earnings_advantage = scale(educ_earnings_advantage)[,1],
   ) |> 
   
-  select(-relative_lfp) |> 
+  select(-female_lfp_rate, -male_lfp_rate) |> 
   
   # fill in rows for all countries
   group_by(country) |> 
