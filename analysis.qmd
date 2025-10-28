@@ -12,9 +12,29 @@ editor: visual
 
 -   The oldest Finnish cohort has perfect prediction, needs to be joined up somehow, then there are a bunch of extra cohorts that have too few marriages.
 
--   UK has a bunch of 0 weight observations
+-   The UK has a bunch of 0 weight observations - these are extension statistics for (1500 Scotland and Wales, 2000 Northern Ireland) - these should be thrown out, they are for making separate analyses of those countries, the original sample is nationally representative
 
 -   UK BHPS and German surveys have a lot of missing values on education
+
+    -   UK BHPS had very sparse education records
+
+    -   UK BHPS also has patchy start dates of first unions
+
+    -   I think I will just get rid of them from the analysis, seeing especially as I've got GGS for them now
+
+-   Hungary gets deleted because it's missing a nativity indicator - should add a category missing by design, so does a whole survey in Netherlands
+
+-   Spain, Polish, and 1997 US additional data sets in the original data set are exclusively women
+
+-   2nd spanish dataset also has overwhelming majority of women
+
+```{r issue-button}
+# countries with missing ISLEDs
+analysis_select |> filter(is.na(isled)) |> group_by(country, round, isced_7) |> summarise(n = n_distinct(respid)) |> print(n=500)
+
+# countries with missing foreign_born
+analysis_select |> filter(is.na(foreign_born)) |> group_by(country, round, foreign_born) |> summarise(n = n_distinct(respid)) |> print(n=500)
+```
 
 ## Initial setup
 
