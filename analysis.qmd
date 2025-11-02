@@ -4,11 +4,9 @@ format: html
 editor: visual
 ---
 
-## Todo
-
--   Review the cohorts
-
 ## Known Issues
+
+-   Getting perfect prediction problems...
 
 -   The oldest Finnish cohort has perfect prediction, needs to be joined up somehow, then there are a bunch of extra cohorts that have too few marriages.
 
