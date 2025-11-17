@@ -376,7 +376,7 @@ modelling <- ames_provisional |>
            into = c("country", "cohort"), 
            sep = "_", 
            remove = FALSE) |> 
-  select(country_cohort, country, cohort, starts_with("rescaled")) |> 
+  select(country_cohort, country, cohort, starts_with("rescaled"), ame) |> 
   
   # add average marriage year by country-cohort
   left_join(
@@ -414,10 +414,14 @@ modelling <- modelling |>
   mutate(region = case_when(
     region == "Eastern Europe" ~ "Central and Eastern Europe",
     region == "Western Europe" ~ "Western Europe and North America",
+    region == "Western Asia" ~ "Central and Eastern Europe",
+    region == "Central Asia" ~ "Central and Eastern Europe",
+    region == "South America" ~ "Southern Europe",
+    region == "Southern Europe" ~ "Southern Europe and South America",
     TRUE ~ region
   ))
 
-plots_by_region <- modelling |> filter(country_cohort != "Canada_after 2003") |> 
+plots_by_region <- modelling |> 
   group_split(region) |>
   map(~ {
     region_name <- unique(.x$region)
@@ -443,14 +447,12 @@ if (is.null(names(plots_by_region))) {
 }
 
 # Save each plot in the list
-walk2(
-  plots_by_region,
-  names(plots_by_region),
-  ~ ggsave(
-      filename = paste0(output_plots, gsub(" ", "_", .y), ".png")), # replaces spaces with underscores
-      plot = .x,
-      width = 10,       # PowerPoint-friendly width
-      height = 5.625,   # 16:9 aspect ratio
-      dpi = 300         # high quality
-)
+# Alternative using imap
+imap(plots_by_region, ~ ggsave(
+  filename = paste0(output_plots, "/", gsub(" ", "_", .y), ".png"),
+  plot = .x,
+  width = 10,
+  height = 5.625,
+  dpi = 300
+))
 ```
