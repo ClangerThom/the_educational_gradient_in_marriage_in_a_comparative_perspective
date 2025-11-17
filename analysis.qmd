@@ -78,16 +78,54 @@ analysis_select |> filter(is.na(foreign_born)) |> group_by(country, round, forei
 Consider whether you want to do winsorization - add it in for the article, not the thesis
 
 ```{r weights}
-analysis_select <- analysis_select |> 
-  mutate(
-    naive_perswgt = if_else(is.na(perswgt), 1, perswgt)
-  )
+# Define parameters
+winsor_factor <- 3
+max_iterations <- 15
+
+# Start the pipe
+analysis_weights <- analysis_select %>% 
+  # Tag one observation per respondent
+  group_by(country, round, respid) %>%
+  mutate(oneobs = row_number() == 1) %>%
+  ungroup()
+
+# Iterative winsorization and rescaling
+for (i in 1:max_iterations) {
+  analysis_weights <- analysis_weights %>%
+    group_by(country, round) %>%
+    mutate(
+      median_weight = median(perswgt[oneobs], na.rm = TRUE),
+      perswgt = if_else(
+        oneobs & !is.na(perswgt) & perswgt > winsor_factor * median_weight,
+        winsor_factor * median_weight,
+        perswgt
+      ),
+      mean_weight = mean(perswgt[oneobs], na.rm = TRUE),
+      perswgt = if_else(
+        oneobs & !is.na(perswgt),
+        perswgt / mean_weight,
+        perswgt
+      )
+    ) %>%
+    select(-median_weight, -mean_weight) %>%
+    ungroup()
+}
+
+# Spread corrected weights to all person-observations
+analysis_weights <- analysis_weights %>%
+  group_by(country, round, respid) %>%
+  arrange(desc(oneobs)) %>%
+  mutate(perswgt = first(perswgt)) %>%  # Simply replace all with first
+  ungroup() %>%
+  select(-oneobs) %>% 
+  arrange(country, round, respid) |> 
+  mutate(naive_perswgt = if_else(is.na(perswgt), 1, perswgt))
 ```
 
 ## Creation of country-cohorts and analytical sample
 
 ```{r country-cohorts}
-analysis_proper <- analysis_select |>
+analysis_proper <- analysis_weights |>
   
   # add model covariates
   drop_na(isled, time, enrol_mod, foreign_born, male, in_union) |>
@@ -111,16 +149,21 @@ analysis_proper <- analysis_select |>
     
     # Belarus: combine After 2010 with 2001-2010
     country == "Belarus" & marriage_cohort_cat %in% c("2001-2010", "After 2010") ~ "After 2000",
+    country == "Kazakhstan" & marriage_cohort_cat %in% c("1961-1970", "1971-1980") ~ "Before 1981",
     
     # Belgium: combine 2001-2010 with After 2010, then with 1991-2000
-    country == "Belgium" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "1991-2020",
+    country == "Belgium" & marriage_cohort_cat %in% c("1951-1960", "1961-1970") ~ "Before 1971",
+    country == "Belgium" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "After 1990",
     
     # Bulgaria: combine 2001-2010 with After 2010, then with 1991-2000
-    country == "Bulgaria" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "1991-2020",
+    country == "Bulgaria" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "After 1990",
+    
+    # Canada: perfect prediction after 2010
+    country == "Canada" & marriage_cohort_cat %in% c("2001-2010", "After 2010") ~ "After 2001",
     
     # Croatia: combine all before 1991 into one group, and After 2000 with 1991-2000
     country == "Croatia" & marriage_cohort_cat %in% c("Before 1951", "1951-1960", "1961-1970", "1971-1980", "1981-1990") ~ "Before 1991",
-    country == "Croatia" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "1991-2020",
+    country == "Croatia" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "After 1990",
     
     # Czechia: combine After 2010 with 2001-2010
     country == "Czechia" & marriage_cohort_cat %in% c("2001-2010", "After 2010", "After 2020") ~ "After 2000",
@@ -133,44 +176,58 @@ analysis_proper <- analysis_select |>
     
     # Finland: combine all before 1991 into one group, and After 2000 with 1991-2000
     country == "Finland" & marriage_cohort_cat %in% c("Before 1951", "1951-1960", "1961-1970", "1971-1980", "1981-1990") ~ "Before 1991",
-    country == "Finland" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "1991-2020",
+    country == "Finland" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "After 1990",
     
     # France: combine all 1991 onwards
-    country == "France" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "1991-2020",
+    country == "France" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "After 1990",
     
     # Georgia: combine After 2000 with 1991-2000
-    country == "Georgia" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "1991-2020",
+    country == "Georgia" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "After 1990",
+    country == "Georgia" & marriage_cohort_cat %in% c("1951-1960", "1961-1970") ~ "Before 1971",
     
     # Germany: combine After 2010 with 2001-2010
     country == "Germany" & marriage_cohort_cat %in% c("2001-2010", "After 2010") ~ "After 2000",
     
     # Italy: combine all from 1991 onwards
-    country == "Italy" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "1991-2020",
+    country == "Italy" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "After 1990",
     
     # Kazakhstan: combine After 2010 with 2001-2010
     country == "Kazakhstan" & marriage_cohort_cat %in% c("2001-2010", "After 2010") ~ "After 2000",
+    country == "Kazakhstan" & marriage_cohort_cat %in% c("1961-1970", "1971-1980") ~ "Before 1981",
     
     # Lithuania: combine After 2000 with 1991-2000
-    country == "Lithuania" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "1991-2020",
+    country == "Lithuania" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "After 1990",
     
-    # Netherlands: keep as is (85 events is close to 100)
+    # Moldova
+    country == "Moldova" & marriage_cohort_cat %in% c("2001-2010", "After 2010") ~ "After 2000",
+    
+    # Netherlands:
+    country == "Netherlands" & marriage_cohort_cat %in% c("1991-2000", "2001-2010") ~ "After 1990",
     
     # Norway: combine After 2010 with 2001-2010
     country == "Norway" & marriage_cohort_cat %in% c("2001-2010", "After 2010") ~ "After 2000",
     
+    # Poland
+    country == "Poland" & marriage_cohort_cat %in% c("1951-1960", "1961-1970") ~ "Before 1971",
+    
     # Romania: combine all from 1991 onwards
-    country == "Romania" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "1991-2020",
+    country == "Romania" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "After 1990",
     
     # Russia: combine all from 1991 onwards
-    country == "Russia" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "1991-2020",
+    country == "Russia" & marriage_cohort_cat %in% c("1991-2000", "2001-2010", "After 2010") ~ "After 1990",
     
     # Spain: combine After 2010 with 2001-2010
     country == "Spain" & marriage_cohort_cat %in% c("2001-2010", "After 2010") ~ "After 2000",
+    country == "Spain" & marriage_cohort_cat %in% c("1951-1960", "1961-1970") ~ "Before 1971",
     
-    # Sweden: keep as is (54 events, but might need combining if threshold is 100)
+    # Sweden:
+    country == "Sweden" & marriage_cohort_cat %in% c("1991-2000", "2001-2010") ~ "After 1990",
     
     # United Kingdom: combine After 2010 with 2001-2010
     country == "United Kingdom" & marriage_cohort_cat %in% c("2001-2010", "After 2010") ~ "After 2000",
+    
+    # United States:
+    country == "United States" & marriage_cohort_cat %in% c("1991-2000", "2001-2010") ~ "After 1990",
     
     # Uruguay: combine After 2010 with 2001-2010
     country == "Uruguay" & marriage_cohort_cat %in% c("2001-2010", "After 2010") ~ "After 2000",
@@ -314,7 +371,7 @@ ames_provisional <-
     rescaled_conf.high = (100 * conf.high) / baseline_mar
   ) 
   
-modelling |> ames_provisional |> 
+modelling <- ames_provisional |> 
   separate(country_cohort, 
            into = c("country", "cohort"), 
            sep = "_", 
@@ -323,12 +380,12 @@ modelling |> ames_provisional |>
   
   # add average marriage year by country-cohort
   left_join(
-    analysis_grouped |>
+    analysis_proper|>
       group_by(respid) |>
       filter(row_number() == 1) |>
       ungroup() |> 
       group_by(country_cohort) |> 
-      summarise(avg_birth_cohort = weighted.mean(year, perswgt_mod, na.rm = TRUE)),
+      summarise(avg_birth_cohort = weighted.mean(year, naive_perswgt, na.rm = TRUE)),
     by = "country_cohort"
   )  |> 
   
@@ -395,6 +452,5 @@ walk2(
       width = 10,       # PowerPoint-friendly width
       height = 5.625,   # 16:9 aspect ratio
       dpi = 300         # high quality
-    )
 )
 ```
