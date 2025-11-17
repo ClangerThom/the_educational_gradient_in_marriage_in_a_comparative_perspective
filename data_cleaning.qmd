@@ -216,10 +216,6 @@ micro_clean <- micro_clean |>
   mutate(respid = row_number())
 ```
 
-## Add macrodata
-
--   Please run the macrodata file now.
-
 ## Expansion into long-format
 
 This is computationally very demanding, the resulting df has over 4 million rows. Make sure you have a powerful computer or be prepared to sit for a loooooong time
@@ -424,10 +420,14 @@ analysis <- analysis |>
   ungroup()
 ```
 
-## Additional controls
+## Countries to get rid of
+
+-   UK BHPS - patchy education measures, lots of missing information on union formation. There is now a GGS wave that's higher quality, it's worth getting rid of the headache. (UK round 1)
 
 ```{r finalise-for-analysis}
 analysis <- analysis |> 
+  # Getting rid of countries I've decided to leave out
+  filter(!(country == "United Kingdom" & round == 1)) |> 
   
   # Imputing age at finishing school by taking the median school leaving age in each country-isled combo
   group_by(country, isled) |> 
@@ -455,6 +455,8 @@ analysis <- analysis |>
 
 ## Selection of respondents for analysis
 
+-   added a "missing by design" 3rd category for foreign_born for Hungary and the Netherlands round 1.
+
 ```{r selection}
 analysis_select <- analysis |>
   
@@ -462,17 +464,22 @@ analysis_select <- analysis |>
   
   filter(age_s < 66) |> 
   mutate(
-    foreign_born = case_when(
-      native == 1 ~ 0,
-      native == 2 ~ 1,
+    foreign_born = as.factor(case_when(
+      native == 1 ~ "No",
+      native == 2 ~ "Yes",
+      country == "Hungary" & round == 1 ~ "Missing by design",
+      country == "Netherlands" & round == 1 ~ "Missing by design",
       TRUE ~ NA
-    ),
+    )),
     male = case_when(
       sex == 1 ~ 1,
       sex == 2 ~ 0,
       TRUE ~ NA
-    )
-  )
+    ),
+    
+    marriage_cohort = born_y + 15
+  ) |> 
+  select(-sex, -native, -lhi02, -lhi01, -dem21, -inschool, -harmonised, -source_dataset, -...1, -...2, -edu_cou)
 
 # write.csv(analysis, file = paste0(data_path, "/intermediate_output/analysis.csv"))
 ```
