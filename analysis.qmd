@@ -546,7 +546,9 @@ ames_provisional <-
     rescaled_conf.low = (100 * conf.low) / baseline_mar,
     rescaled_conf.high = (100 * conf.high) / baseline_mar
   ) 
-  
+
+# write_csv(ames_provisional, file = paste0(data_path, "/intermediate_output/marginal_effects.csv"))
+
 modelling <- ames_provisional |> 
   separate(country_cohort, 
            into = c("country", "cohort"), 
@@ -567,7 +569,13 @@ modelling <- ames_provisional |>
   
   # add macro-covariates
   left_join(
-    macro_weighted |> select(country_cohort, educ_earnings_advantage, educ_unemployment_advantage, relative_lfp, cov_educ_unemployment_advantage, cov_educ_earnings_advantage, cov_relative_lfp),
+    macro_weighted |> 
+      select(
+        country_cohort,
+        gender_roles, cov_gender_roles,
+        family_diversity_acceptance, cov_family_diversity_acceptance,
+        std_educ_earnings_advantage, std_educ_unemployment_advantage, std_relative_lfp,
+        cov_std_educ_unemployment_advantage, cov_std_educ_earnings_advantage, cov_std_relative_lfp),
     by = "country_cohort"
   )
   
@@ -585,6 +593,8 @@ modelling <- modelling |>
     country == "Canada" ~ "Western Europe",
     country == "Estonia" ~ "Eastern Europe",
     country == "Lithuania" ~ "Eastern Europe",
+    country == "Uruguay" ~ "Southern Europe",
+    country == "Croatia" ~ "Eastern Europe",
     TRUE ~ region
   )) |> 
   mutate(region = case_when(
@@ -592,7 +602,6 @@ modelling <- modelling |>
     region == "Western Europe" ~ "Western Europe and North America",
     region == "Western Asia" ~ "Central and Eastern Europe",
     region == "Central Asia" ~ "Central and Eastern Europe",
-    region == "South America" ~ "Southern Europe",
     region == "Southern Europe" ~ "Southern Europe and South America",
     TRUE ~ region
   ))
@@ -631,4 +640,180 @@ imap(plots_by_region, ~ ggsave(
   height = 5.625,
   dpi = 300
 ))
+```
+
+## Meta-regression
+
+## Obtaining weights
+
+```{r meta-weights}
+macrovars <- c("std_relative_lfp", "std_educ_unemployment_advantage", "std_educ_earnings_advantage", "family_diversity_acceptance", "gender_roles")
+
+# Initialize weight columns
+for (x in macrovars) {
+  modelling[[paste0("w_", x)]] <- NA_real_
+}
+
+# Obtain meta-regression weights
+cat("\n=== META-REGRESSION WEIGHTS ESTIMATION ===\n\n")
+
+for (x in macrovars) {
+  
+  cat("Variable:", x, "\n")
+  cat(rep("-", 60), "\n", sep = "")
+  
+  # Create complete data (no NAs in key variables)
+  complete_data <- modelling  |> 
+    filter(!is.na(rescaled_ame) & !is.na(rescaled_se) & !is.na(.data[[x]]))
+  
+  n_excluded <- nrow(modelling) - nrow(complete_data)
+  
+  cat("Total observations:", nrow(modelling), "\n")
+  cat("Used in model:", nrow(complete_data), "\n")
+  cat("Excluded (NAs):", n_excluded, "\n\n")
+  
+  # Fit random-effects meta-regression with REML
+  meta_model <- rma(yi = rescaled_ame, 
+                    sei = rescaled_se, 
+                    mods = ~ get(x),
+                    data = complete_data,
+                    method = "REML",
+                    test = "knha")
+  
+  # Print model summary
+  cat("Model results:\n")
+  print(summary(meta_model))
+  cat("\n")
+  
+  # Extract meta-regression weights
+  weights_raw <- weights(meta_model)
+  
+  # Rescale to average = 1
+  weights_rescaled <- weights_raw / mean(weights_raw)
+  
+  cat("Weight summary:\n")
+  cat("  Mean:", round(mean(weights_rescaled), 4), "\n")
+  cat("  Range: [", round(min(weights_rescaled), 4), ",", 
+      round(max(weights_rescaled), 4), "]\n\n")
+  
+  # Assign weights back to complete cases only
+  modelling[[paste0("w_", x)]][!is.na(modelling$rescaled_ame) & 
+                                !is.na(modelling$rescaled_se) & 
+                                !is.na(modelling[[x]])] <- weights_rescaled
+  
+  cat("\n")
+}
+
+cat("=== WEIGHT CALCULATION COMPLETE ===\n\n")
+
+# Summary of weights
+cat("Weight coverage summary:\n")
+for (x in macrovars) {
+  w_col <- paste0("w_", x)
+  n_nonmissing <- sum(!is.na(modelling[[w_col]]))
+  cat(sprintf("  %-40s: %3d/%3d obs (%.1f%%)\n", 
+              w_col, n_nonmissing, nrow(modelling), 
+              100 * n_nonmissing / nrow(modelling)))
+}
+
+for (x in macrovars) {
+  
+  # Get coverage variable
+  cov_var <- paste0("cov_", x)
+  
+  # Rescale coverage to average = 1
+  cov_rescaled <- modelling[[cov_var]] / mean(modelling[[cov_var]], na.rm = TRUE)
+  
+  # Combine meta-regression and coverage weights
+  modelling[[paste0("w_final_", x)]] <- modelling[[paste0("w_", x)]] * cov_rescaled
+}
+```
+
+#### Metaregression itself
+
+```{r weighted-meta-regression}
+m_relative_lfp <- lm(rescaled_ame ~ std_relative_lfp, weights = w_final_std_relative_lfp ,data = modelling)
+
+# going up on this scale means disadvantage to education
+m_unemployment_adv <- lm(rescaled_ame ~ std_educ_unemployment_advantage, weights = w_final_std_educ_unemployment_advantage ,data = modelling)
+
+# going up on this scale means theres more advantage to education
+m_earnings_adv <- lm(rescaled_ame ~ std_educ_earnings_advantage, weights = w_final_std_educ_earnings_advantage ,data = modelling)
+
+# higher is more traditional
+m_family_diversity_acceptance <- lm(rescaled_ame ~ family_diversity_acceptance, weights = w_final_family_diversity_acceptance,data = modelling)
+
+# higher is more egalitarian
+m_gender_roles <-  lm(rescaled_ame ~ gender_roles, weights = w_final_gender_roles,data = modelling)
+```
+
+#### Output table
+
+```{r metareg-output}
+# List of models with descriptive names
+models <- list(
+  "Relative labor force participation" = m_relative_lfp,
+  "Unemployment advantage" = m_unemployment_adv,
+  "Earnings advantage" = m_earnings_adv,
+  "Family diversity acceptance" = m_family_diversity_acceptance,
+  "Gender roles" = m_gender_roles
+)
+
+# Extract coefficients, R², and sample size
+presentation_table <- map_df(names(models), function(name) {
+  model <- models[[name]]
+  coef_info <- tidy(model) %>% filter(term != "(Intercept)")
+  r2 <- glance(model)$r.squared
+  n_contexts <- nobs(model)
+  
+  # Format coefficient with significance stars and SE
+  stars <- case_when(
+    coef_info$p.value < 0.001 ~ "***",
+    coef_info$p.value < 0.01 ~ "**",
+    coef_info$p.value < 0.05 ~ "*",
+    TRUE ~ ""
+  )
+  
+  moderation_effect <- paste0(
+    format(round(coef_info$estimate, 1), nsmall = 1),
+    stars,
+    " (", format(round(coef_info$std.error, 1), nsmall = 1), ")"
+  )
+  
+  tibble(
+    ` ` = name,
+    `Moderation effect` = moderation_effect,
+    `R²` = format(round(r2, 2), nsmall = 2),
+    `N contexts` = n_contexts
+  )
+})
+
+# Calculate total contexts (assuming this is your total sample)
+total_contexts <- nrow(modelling)
+
+# Add percentage column
+presentation_table <- presentation_table %>%
+  mutate(`% of total` = paste0(round((`N contexts` / total_contexts) * 100, 1), "%"))
+
+# Create flextable
+ft <- flextable(presentation_table) %>%
+  set_header_labels(
+    ` ` = "",
+    `Moderation effect` = "Moderation effect",
+    `R²` = "R²",
+    `N contexts` = "N contexts",
+    `% of total` = "% of total"
+  ) %>%
+  align(j = 2:5, align = "right", part = "all") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all") %>%
+  bold(part = "header") %>%
+  add_footer_lines("Note: *** p<0.001, ** p<0.01, * p<0.05. Standard errors in parentheses.") %>%
+  align(align = "left", part = "footer") %>%
+  fontsize(size = 10, part = "footer") %>%
+  autofit()
+
+# Export to Word
+save_as_docx(ft, path = paste0(output_tables, "/moderation_results_table.docx"))
 ```
