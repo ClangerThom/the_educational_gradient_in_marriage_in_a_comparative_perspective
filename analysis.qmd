@@ -4,6 +4,10 @@ format: html
 editor: visual
 ---
 
+# WARNING
+
+WHEN RERUNNING THE CODE, TEST THAT ALL PEOPLE WHO GOT MARRIED AFTER 40 AREN'T ALL BEING COUNTED AS MARRYING EXACTLY AT 40.
+
 ## Known Issues
 
 -   Spain, Polish, and 1997 US additional data sets in the original data set are exclusively women
@@ -79,16 +83,16 @@ winsor_factor <- 3
 max_iterations <- 15
 
 # Start the pipe
-analysis_weights <- analysis_select %>% 
+analysis_weights <- analysis_select |> 
   # Tag one observation per respondent
-  group_by(country, round, respid) %>%
-  mutate(oneobs = row_number() == 1) %>%
+  group_by(country, round, respid) |>
+  mutate(oneobs = row_number() == 1) |>
   ungroup()
 
 # Iterative winsorization and rescaling
 for (i in 1:max_iterations) {
-  analysis_weights <- analysis_weights %>%
-    group_by(country, round) %>%
+  analysis_weights <- analysis_weights |>
+    group_by(country, round) |>
     mutate(
       median_weight = median(perswgt[oneobs], na.rm = TRUE),
       perswgt = if_else(
@@ -102,18 +106,18 @@ for (i in 1:max_iterations) {
         perswgt / mean_weight,
         perswgt
       )
-    ) %>%
-    select(-median_weight, -mean_weight) %>%
+    ) |>
+    select(-median_weight, -mean_weight) |>
     ungroup()
 }
 
 # Spread corrected weights to all person-observations
-analysis_weights <- analysis_weights %>%
-  group_by(country, round, respid) %>%
-  arrange(desc(oneobs)) %>%
-  mutate(perswgt = first(perswgt)) %>%  # Simply replace all with first
-  ungroup() %>%
-  select(-oneobs) %>% 
+analysis_weights <- analysis_weights |>
+  group_by(country, round, respid) |>
+  arrange(desc(oneobs)) |>
+  mutate(perswgt = first(perswgt)) |>  # Simply replace all with first
+  ungroup() |>
+  select(-oneobs) |> 
   arrange(country, round, respid) |> 
   mutate(naive_perswgt = if_else(is.na(perswgt), 1, perswgt))
 
@@ -303,7 +307,115 @@ macro_weighted <- analysis_proper |>
   )
 ```
 
-## Descriptives
+## Descriptives and supplementary information
+
+#### Table of descriptives
+
+```{r descriptives-table}
+# Create table
+fb_props <- prop.table(table(analysis_proper$foreign_born, useNA = "no"))
+
+desc_table <- tibble(
+  Variable = c(
+    "Educational attainment (standardized)",
+    "Time",
+    "Time squared",
+    "Male",
+    "In union",
+    "Enrolled",
+    "Missing by design",
+    "Not born outside country",
+    "Born outside country"
+  ),
+  Mean = c(
+    mean(analysis_proper$isled_standard, na.rm = TRUE),
+    mean(analysis_proper$time, na.rm = TRUE),
+    mean(analysis_proper$time^2, na.rm = TRUE),
+    mean(analysis_proper$male, na.rm = TRUE),
+    mean(analysis_proper$in_union, na.rm = TRUE),
+    mean(analysis_proper$enrol_mod, na.rm = TRUE),
+    fb_props
+  ),
+  SD = c(
+    sd(analysis_proper$isled_standard, na.rm = TRUE),
+    sd(analysis_proper$time, na.rm = TRUE),
+    sd(analysis_proper$time^2, na.rm = TRUE),
+    NA, NA, NA, NA, NA, NA
+  ),
+  Min = c(
+    min(analysis_proper$isled_standard, na.rm = TRUE),
+    min(analysis_proper$time, na.rm = TRUE),
+    min(analysis_proper$time^2, na.rm = TRUE),
+    min(analysis_proper$male, na.rm = TRUE),
+    min(analysis_proper$in_union, na.rm = TRUE),
+    min(analysis_proper$enrol_mod, na.rm = TRUE),
+    NA, NA, NA
+  ),
+  Max = c(
+    max(analysis_proper$isled_standard, na.rm = TRUE),
+    max(analysis_proper$time, na.rm = TRUE),
+    max(analysis_proper$time^2, na.rm = TRUE),
+    max(analysis_proper$male, na.rm = TRUE),
+    max(analysis_proper$in_union, na.rm = TRUE),
+    max(analysis_proper$enrol_mod, na.rm = TRUE),
+    NA, NA, NA
+  )
+)
+
+# Add sample size rows
+sample_info <- tibble(
+  Variable = c("N respondents", "N observations", "N events"),
+  Mean = c(
+    n_distinct(analysis_proper$respid),
+    nrow(analysis_proper),
+    sum(analysis_proper$event, na.rm = TRUE)
+  ),
+  SD = c(NA, NA, NA),
+  Min = c(NA, NA, NA),
+  Max = c(NA, NA, NA)
+)
+
+desc_table <- bind_rows(desc_table, sample_info)
+
+# Format numbers
+desc_table <- desc_table |>
+  mutate(
+    Mean = format(round(Mean, 2), nsmall = 2, big.mark = ","),
+    SD = ifelse(is.na(SD), "", format(round(SD, 2), nsmall = 2)),
+    Min = format(round(Min, 2), nsmall = 2),
+    Max = format(round(Max, 2), nsmall = 2)
+  ) |> 
+  add_row(
+    Variable = "Migration status",
+    Mean = NA,
+    SD = NA,
+    Min = NA,
+    Max = NA,
+    .before = 7  # Adjust this number to where you want it inserted
+  )
+
+# Create flextable
+ft <- flextable(desc_table) |>
+  set_header_labels(
+    Variable = "",
+    Mean = "Mean",
+    SD = "SD",
+    Min = "Min",
+    Max = "Max"
+  ) |>
+  align(j = 2:5, align = "right", part = "all") |>
+  align(j = 1, align = "left", part = "all") |>
+  font(fontname = "Times New Roman", part = "all") |>
+  fontsize(size = 11, part = "all") |>
+  bold(part = "header") |>
+  hline(i = 10) |>
+  italic(i = 12:13, j = 1) |>
+  padding(i = 8:10, j = 1, padding.left = 20) |>  # Indent the three migration rows
+  autofit()
+
+# Export to Word
+save_as_docx(ft, path = paste0(output_tables, "/descriptive_statistics_table.docx"))
+```
 
 #### Kaplan-Meier Curve
 
