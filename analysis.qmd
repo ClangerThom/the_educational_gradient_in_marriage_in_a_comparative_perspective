@@ -483,6 +483,64 @@ ggsave(
 )
 ```
 
+#### Supplementary info
+
+Table with distribution of marriages by context
+
+```{r events by context}
+table_context <- analysis_proper |> 
+  group_by(respid) |> 
+  filter(time == max(time)) |> 
+  ungroup() |> 
+  
+  count(country, marriage_cohort_cat, event) |> 
+  mutate(
+    Context = paste(country, marriage_cohort_cat),
+    event = case_when(
+      event == 0 ~ "Not married",
+      event == 1 ~ "Married",
+      TRUE ~ NA
+    )
+  ) |> 
+  select(-country, -marriage_cohort_cat) |> 
+  pivot_wider(id_cols = Context, names_from = event, values_from = n) |> 
+  mutate(
+    Total = `Not married` + Married,
+    Prop_married = Married/Total
+  )
+  
+table_context <- table_context |> 
+  bind_rows(
+    table_context |> 
+      summarise(
+        Context = "Total",
+        `Not married` = sum(`Not married`),
+        Married = sum(Married),
+        Total = sum(Total)
+      )
+  )
+
+# Create flextable
+ft <- flextable(table_context) |> 
+  set_header_labels(
+    Context = "Context",
+    `Not married` = "Not married",
+    Married = "Married",
+    Total = "Total",
+    Prop_married = "Proportion married"
+  ) |> 
+  align(j = 2:4, align = "right", part = "all") |> 
+  align(j = 1, align = "left", part = "all") |> 
+  font(fontname = "Times New Roman", part = "all") |> 
+  fontsize(size = 10, part = "all") |> 
+  bold(part = "header") |> 
+  bold(i = nrow(table_context), part = "body") |>  # Bold the Total row
+  hline(i = nrow(table_context) - 1) |>  # Line above Total row
+  autofit()
+
+save_as_docx(ft, path = paste0(output_tables, "/supplementary_context.docx"))
+```
+
 ## Modelling micro-level
 
 ```{r models-micro}
@@ -579,7 +637,7 @@ modelling <- ames_provisional |>
     by = "country_cohort"
   )
   
-  
+ 
 ```
 
 ## Margins plot
@@ -816,4 +874,16 @@ ft <- flextable(presentation_table) %>%
 
 # Export to Word
 save_as_docx(ft, path = paste0(output_tables, "/moderation_results_table.docx"))
+```
+
+#### Supplementary table for macrovariable scores by context
+
+```{r macro-vars-by-context}
+
+```
+
+#### Supplementary table for model output
+
+```{r macro-vars-by-context}
+
 ```
