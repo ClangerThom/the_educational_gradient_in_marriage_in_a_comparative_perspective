@@ -126,7 +126,7 @@ analysis_weights <- analysis_weights %>%
 analysis_proper <- analysis_weights |>
   
   # add model covariates (and unknown marriage year)
-  drop_na(isled, time, enrol_mod, foreign_born, male, in_union, year) |>
+  drop_na(isled, time, enrol_mod, foreign_born, male, in_union, event) |>
   
   # Creation of country-cohorts and standardisation of ISLED (across contexts)
   mutate(
@@ -305,7 +305,7 @@ macro_weighted <- analysis_proper |>
 
 ## Descriptives
 
-#### Kaplan-Meier Curves
+#### Kaplan-Meier Curve
 
 I always just need to keep the last row, the outcome variable will be event.
 
@@ -336,7 +336,17 @@ km_plot <- survfit2(Surv(time, event) ~ isled_cat, km_plotting_data, weights = n
   mutate(
     estimate = 1 - estimate,
     conf.high = 1 - conf.high,
-    conf.low = 1 - conf.low
+    conf.low = 1 - conf.low,
+    time = time + 14  # Add 14 to shift 1->15, 15->40
+  ) |> 
+  bind_rows(
+    tibble(
+      value = c("High (>+0.5 SD)", "Medium (-0.5 to +0.5 SD)", "Low (<-0.5 SD)"),
+      time = 14,
+      estimate = 0,
+      conf.low = 0,
+      conf.high = 0
+    )
   ) |> 
   ggplot(aes(x = time, y = estimate, group = value, ymin = conf.low, ymax = conf.high)) +
     geom_stepribbon(aes(color = value, fill = value)) +
@@ -345,13 +355,20 @@ km_plot <- survfit2(Surv(time, event) ~ isled_cat, km_plotting_data, weights = n
     scale_fill_discrete(breaks = c("High (>+0.5 SD)", "Medium (-0.5 to +0.5 SD)", "Low (<-0.5 SD)")) +
     scale_color_discrete(breaks = c("High (>+0.5 SD)", "Medium (-0.5 to +0.5 SD)", "Low (<-0.5 SD)")) +
     labs(
-      color = NULL,
-      fill = NULL,
-      groups = NULL,
+      color = "Educational attainment",
+      fill = "Educational attainment",
       y = "Married (%)",
-      x = "Duration single since 15"
+      x = "Age"
     ) + 
     theme_bw()
+
+ggsave(
+  filename = paste0(output_plots, "/kaplan_meier.png"),
+  plot = km_plot,
+  width = 10,
+  height = 5.625,
+  dpi = 300
+)
 ```
 
 ## Modelling micro-level
