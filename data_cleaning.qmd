@@ -10,31 +10,19 @@ editor: visual
 
 ## Known issues
 
-Personal issues:
-
--   UK BHPS has a "left-truncated" marriage indicator -\> find out what it means
-
 Issues with the dataset:
+
+-   Lots of people are getting married right at the end of the risk window, I feel like that's something wrong with the conditions for the event.
+
+<!-- -->
 
 -   A new unique identifier is needed, since respid from Czechia round 2 overlaps with respids of Estonia and Italy round 2
 
     -   Solved for now by generating a new respid based on rownumber
 
--   UK BHPS has 3500 respondents with a personal weight of 0
-
 -   Kazakhstan is disappearing despite officially being in harmonized_histories_I
 
     -   IT'S MISCODED - the iso3n code in the file 860 is for Uzbekistan, not Kazakhstan, it should be 398
-
-## List of countries that need harmonisation
-
--   [x] France GGS round 2
-
--   [x] Sweden GGS round 2
-
--   [x] Netherlands GGS round 2
-
-I harmonised in a bunch more in an old version, but I was just dumb and Claudius Garten from NIDI had already done it and I just hadn't noticed it.
 
 ## Initial setup
 
@@ -479,7 +467,7 @@ analysis_select <- analysis |>
     
     marriage_cohort = born_y + 15
   ) |> 
-  select(-sex, -native, -lhi02, -lhi01, -dem21, -inschool, -harmonised, -source_dataset, -...1, -...2, -edu_cou)
+  select(-sex, -native, -lhi02, -lhi01, -dem21, -inschool, -harmonised, -source_dataset, -...1, -...2, -edu_cou, -isced_7)
 
 # write.csv(analysis, file = paste0(data_path, "/intermediate_output/analysis.csv"))
 ```

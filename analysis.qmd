@@ -45,6 +45,11 @@ library(marginaleffects)
 library(sandwich)
 library(lmtest)
 
+# for KM curves
+library(survival)
+library(ggsurvfit)
+library(pammtools)
+
 # possible speeding up models
 library(speedglm)
 
@@ -66,7 +71,7 @@ analysis_select |> filter(is.na(foreign_born)) |> group_by(country, round, forei
 
 ## Preparation
 
-Consider whether you want to do winsorization - add it in for the article, not the thesis
+Winsorisation is a necessary steps, there are obviously wrong weights in this dataset.
 
 ```{r weights}
 # Define parameters
@@ -111,6 +116,8 @@ analysis_weights <- analysis_weights %>%
   select(-oneobs) %>% 
   arrange(country, round, respid) |> 
   mutate(naive_perswgt = if_else(is.na(perswgt), 1, perswgt))
+
+# write.csv(analysis_weights, file = paste0(data_path, "/intermediate_output/analysis_weights.csv"))
 ```
 
 ## Creation of country-cohorts and analytical sample
@@ -297,6 +304,55 @@ macro_weighted <- analysis_proper |>
 ```
 
 ## Descriptives
+
+#### Kaplan-Meier Curves
+
+I always just need to keep the last row, the outcome variable will be event.
+
+```{r KM-curves}
+km_plotting_data <- analysis_proper |>
+  select(respid, time, event, isled, naive_perswgt) |> 
+  group_by(respid) |> 
+  filter(time == max(time)) |> 
+  ungroup() |> 
+  mutate(
+    isled_cat = case_when(
+      isled > mean(isled, na.rm = TRUE) + 0.5 * sd(isled, na.rm = TRUE) ~ "High (>+0.5 SD)",
+      isled < mean(isled, na.rm = TRUE) - 0.5 * sd(isled, na.rm = TRUE) ~ "Low (<-0.5 SD)",
+      TRUE ~ "Medium (-0.5 to +0.5 SD)"
+    ),
+    isled_cat = factor(isled_cat, 
+                       levels = c("High (>+0.5 SD)", "Medium (-0.5 to +0.5 SD)", "Low (<-0.5 SD)"),
+                       ordered = TRUE)
+  ) |> 
+  select(-isled)
+
+km_plot <- survfit2(Surv(time, event) ~ isled_cat, km_plotting_data, weights = naive_perswgt) |> 
+  tidy() |> 
+  separate(strata, 
+           into = c("measure", "value"), 
+           sep = "=", 
+           remove = TRUE) |>
+  mutate(
+    estimate = 1 - estimate,
+    conf.high = 1 - conf.high,
+    conf.low = 1 - conf.low
+  ) |> 
+  ggplot(aes(x = time, y = estimate, group = value, ymin = conf.low, ymax = conf.high)) +
+    geom_stepribbon(aes(color = value, fill = value)) +
+    geom_step(color = "grey") +
+    scale_y_continuous(labels = scales::percent) +
+    scale_fill_discrete(breaks = c("High (>+0.5 SD)", "Medium (-0.5 to +0.5 SD)", "Low (<-0.5 SD)")) +
+    scale_color_discrete(breaks = c("High (>+0.5 SD)", "Medium (-0.5 to +0.5 SD)", "Low (<-0.5 SD)")) +
+    labs(
+      color = NULL,
+      fill = NULL,
+      groups = NULL,
+      y = "Married (%)",
+      x = "Duration single since 15"
+    ) + 
+    theme_bw()
+```
 
 ## Modelling micro-level
 
