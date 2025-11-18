@@ -244,7 +244,7 @@ marriage_order <- micro_clean |>
     # or keep first row if there are none
     (all(is.na(married) | married != 1) & row_number() == 1)
   ) |> 
-  # If there are multiple marraiges, keep only the first one
+  # If there are multiple marriages, keep only the first one
   slice(1) |> 
   ungroup() |> 
   
@@ -256,6 +256,8 @@ write.csv(marriage_order, file = paste0(data_path, "/intermediate_output/marriag
 ```
 
 ## Pivot to long
+
+ISSUE detected - everyone ever married keeps the married tag but also has duration 26,
 
 ```{r long-format}
 analysis <- micro_clean |> 
@@ -304,8 +306,9 @@ analysis <- micro_clean |>
   # creating the dependent variable
   group_by(respid) |> 
   mutate(
+    # ISSUE - added a condition that they also have to be younger than 41 at marriage
     event = if_else(
-      max(time) == time & married == 1,
+      max(time) == time & married == 1 & age_marr < 41,
       1,
       0
     )

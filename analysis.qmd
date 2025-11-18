@@ -125,8 +125,8 @@ analysis_weights <- analysis_weights %>%
 ```{r country-cohorts}
 analysis_proper <- analysis_weights |>
   
-  # add model covariates
-  drop_na(isled, time, enrol_mod, foreign_born, male, in_union) |>
+  # add model covariates (and unknown marriage year)
+  drop_na(isled, time, enrol_mod, foreign_born, male, in_union, year) |>
   
   # Creation of country-cohorts and standardisation of ISLED (across contexts)
   mutate(
